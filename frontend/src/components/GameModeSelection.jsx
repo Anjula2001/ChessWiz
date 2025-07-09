@@ -1,9 +1,21 @@
 import { useState } from 'react';
 import './GameModeSelection.css';
 
-function GameModeSelection({ selectedDifficulty, onBackToHome, onSelectMode }) {
+function GameModeSelection({ selectedDifficulty, onBackToHome, onSelectMode, onDifficultyChange }) {
   const [selectedMode, setSelectedMode] = useState('single');
   const [selectedColor, setSelectedColor] = useState('white');
+
+  // Available difficulty levels matching backend
+  const difficultyLevels = [
+    { id: 'beginner', name: 'Beginner', elo: '1000 ELO', icon: '🟢' },
+    { id: 'easy', name: 'Easy', elo: '1300 ELO', icon: '🟡' },
+    { id: 'intermediate', name: 'Intermediate', elo: '1600 ELO', icon: '🟠' },
+    { id: 'advanced', name: 'Advanced', elo: '2000 ELO', icon: '🔴' },
+    { id: 'expert', name: 'Expert', elo: '2400 ELO', icon: '🟣' },
+    { id: 'grandmaster', name: 'Grandmaster', elo: '2800 ELO', icon: '⚫' },
+    { id: 'superhuman', name: 'Superhuman', elo: '3200 ELO', icon: '🚀' },
+    { id: 'maximum', name: 'Maximum', elo: '3500+ ELO', icon: '⚡' }
+  ];
 
   const gameModes = [
     {
@@ -38,17 +50,20 @@ function GameModeSelection({ selectedDifficulty, onBackToHome, onSelectMode }) {
 
   function getDifficultyLabel(difficulty) {
     const labels = {
-      'beginner': '1000 ELO',
-      'intermediate': '1400 ELO', 
-      'advanced': '1800 ELO',
-      'master': '2200 ELO',
-      'grandmaster': '3500+ ELO'
+      'beginner': '1000 ELO - Beginner',
+      'easy': '1300 ELO - Easy', 
+      'intermediate': '1600 ELO - Intermediate',
+      'advanced': '2000 ELO - Advanced',
+      'expert': '2400 ELO - Expert',
+      'grandmaster': '2800 ELO - Grandmaster',
+      'superhuman': '3200 ELO - Superhuman 🚀',
+      'maximum': '3500+ ELO - Maximum ⚡'
     };
-    return labels[difficulty] || '1400 ELO';
+    return labels[difficulty] || '1600 ELO - Intermediate';
   }
 
   const handleStartGame = () => {
-    onSelectMode(selectedMode, selectedColor);
+    onSelectMode(selectedMode, selectedColor, selectedDifficulty);
   };
 
   return (
@@ -134,6 +149,31 @@ function GameModeSelection({ selectedDifficulty, onBackToHome, onSelectMode }) {
             </div>
           </div>
         </div>
+
+        {/* Difficulty Selection - only show for single player mode */}
+        {selectedMode === 'single' && (
+          <div className="difficulty-selection">
+            <h3>Choose AI Difficulty</h3>
+            <div className="difficulty-grid">
+              {difficultyLevels.map((level) => (
+                <div
+                  key={level.id}
+                  className={`difficulty-option ${selectedDifficulty === level.id ? 'selected' : ''}`}
+                  onClick={() => onDifficultyChange && onDifficultyChange(level.id)}
+                >
+                  <div className="difficulty-icon">{level.icon}</div>
+                  <div className="difficulty-info">
+                    <h4>{level.name}</h4>
+                    <p>{level.elo}</p>
+                  </div>
+                  <div className={`difficulty-radio ${selectedDifficulty === level.id ? 'checked' : ''}`}>
+                    {selectedDifficulty === level.id && <div className="radio-dot"></div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="mode-actions">
           <button className="start-game-button" onClick={handleStartGame}>

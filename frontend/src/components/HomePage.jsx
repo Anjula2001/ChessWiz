@@ -40,7 +40,7 @@ function HomePage({ onPlayGame }) {
             <div className="feature-card">
               <div className="feature-icon">📈</div>
               <h3>Adaptive Difficulty</h3>
-              <p>5 skill levels from beginner (1000 ELO) to grandmaster (3500+ ELO)</p>
+              <p>8 skill levels from beginner (1000 ELO) to maximum (3500+ ELO)</p>
             </div>
             <div className="feature-card">
               <div className="feature-icon">⚡</div>
@@ -67,7 +67,7 @@ function HomePage({ onPlayGame }) {
             <div className="stat-label">Max ELO Rating</div>
           </div>
           <div className="stat-item">
-            <div className="stat-number">5</div>
+            <div className="stat-number">8</div>
             <div className="stat-label">Difficulty Levels</div>
           </div>
         </div>

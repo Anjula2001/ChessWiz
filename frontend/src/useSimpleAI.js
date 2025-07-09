@@ -3,9 +3,9 @@ import { useEffect, useState, useCallback } from 'react';
 import { Chess } from 'chess.js';
 
 // Communication function to get best move from backend Stockfish API
-const getStockfishMove = async (fen, depth = 15) => {
+const getStockfishMove = async (fen, difficulty = 'intermediate') => {
   try {
-    console.log('🌐 Sending request to Stockfish backend...');
+    console.log(`🌐 Sending request to Stockfish backend (difficulty: ${difficulty})...`);
     
     const response = await fetch('http://localhost:3001/getBestMove', {
       method: 'POST',
@@ -14,7 +14,7 @@ const getStockfishMove = async (fen, depth = 15) => {
       },
       body: JSON.stringify({ 
         fen: fen,
-        depth: depth 
+        difficulty: difficulty  // Send difficulty instead of depth
       }),
     });
 
@@ -26,7 +26,14 @@ const getStockfishMove = async (fen, depth = 15) => {
     console.log('📡 Backend response:', data);
     
     if (data.bestMove && data.bestMove !== '(none)') {
-      return data.bestMove;
+      return {
+        move: data.bestMove,
+        eloRating: data.eloRating,
+        analysisTime: data.analysisTime,
+        depth: data.analysisDepth,
+        strength: data.strength,
+        engine: data.engine
+      };
     } else {
       throw new Error('No valid move received from backend');
     }
@@ -107,6 +114,19 @@ export const useSimpleAI = (difficulty = 'intermediate') => {
   const [isReady, setIsReady] = useState(false);
   const [bestMove, setBestMove] = useState(null);
   const [isThinking, setIsThinking] = useState(false);
+  const [engineInfo, setEngineInfo] = useState(null);
+
+  // Define the complete difficulty mapping that matches backend
+  const DIFFICULTY_SETTINGS = {
+    beginner: { eloRating: 1000, depth: 6, timeLimit: 500, skillLevel: 5 },
+    easy: { eloRating: 1300, depth: 8, timeLimit: 800, skillLevel: 10 },
+    intermediate: { eloRating: 1600, depth: 10, timeLimit: 1200, skillLevel: 15 },
+    advanced: { eloRating: 2000, depth: 12, timeLimit: 2000, skillLevel: 18 },
+    expert: { eloRating: 2400, depth: 15, timeLimit: 3000, skillLevel: 20 },
+    grandmaster: { eloRating: 2800, depth: 18, timeLimit: 5000, skillLevel: 20 },
+    superhuman: { eloRating: 3200, depth: 22, timeLimit: 8000, skillLevel: 20 },
+    maximum: { eloRating: 3500, depth: 25, timeLimit: 12000, skillLevel: 20 }
+  };
 
   useEffect(() => {
     // Simple AI is always ready
@@ -128,22 +148,13 @@ export const useSimpleAI = (difficulty = 'intermediate') => {
     setBestMove(null);
     
     try {
-      // First try to get move from Stockfish backend
-      const depthMap = {
-        beginner: 8,
-        intermediate: 12,
-        advanced: 15,
-        master: 18,
-        grandmaster: 20
-      };
-      
-      const depth = depthMap[difficulty] || 15;
-      
+      // First try to get move from Stockfish backend with proper difficulty
       try {
-        const stockfishMove = await getStockfishMove(fen, depth);
-        if (stockfishMove) {
-          setBestMove(stockfishMove);
-          console.log('🎯 Stockfish move:', stockfishMove);
+        const stockfishResult = await getStockfishMove(fen, difficulty);
+        if (stockfishResult && stockfishResult.move) {
+          setBestMove(stockfishResult.move);
+          setEngineInfo(stockfishResult);
+          console.log(`🎯 Stockfish move (${difficulty}):`, stockfishResult.move, `(${stockfishResult.eloRating} ELO)`);
           setIsThinking(false);
           return;
         }
@@ -154,23 +165,33 @@ export const useSimpleAI = (difficulty = 'intermediate') => {
       // Fallback to simple AI if backend fails
       console.log('🔄 Using fallback simple AI...');
       
-      // Simulate thinking time for fallback
-      await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1500));
+      // Simulate thinking time for fallback based on difficulty
+      const difficultyConfig = DIFFICULTY_SETTINGS[difficulty] || DIFFICULTY_SETTINGS.intermediate;
+      await new Promise(resolve => setTimeout(resolve, Math.min(difficultyConfig.timeLimit / 4, 2000)));
       
       const game = new Chess(fen);
       let move;
       const difficultySettings = {
         beginner: () => getRandomMove(game),
-        intermediate: () => Math.random() > 0.3 ? getBestMoveSimple(game, 1) : getRandomMove(game),
+        easy: () => Math.random() > 0.3 ? getBestMoveSimple(game, 1) : getRandomMove(game),
+        intermediate: () => getBestMoveSimple(game, 1),
         advanced: () => getBestMoveSimple(game, 2),
-        master: () => getBestMoveSimple(game, 2),
-        grandmaster: () => getBestMoveSimple(game, 2)
+        expert: () => getBestMoveSimple(game, 2),
+        grandmaster: () => getBestMoveSimple(game, 2),
+        superhuman: () => getBestMoveSimple(game, 2),
+        maximum: () => getBestMoveSimple(game, 2)
       };
       
       move = difficultySettings[difficulty] ? difficultySettings[difficulty]() : getBestMoveSimple(game, 1);
       
       if (move) {
         setBestMove(move);
+        setEngineInfo({
+          move,
+          eloRating: difficultyConfig.eloRating,
+          engine: 'Simple AI Fallback',
+          fallback: true
+        });
         console.log('🎯 Fallback AI move:', move);
       } else {
         console.warn('⚠️ No move found');
@@ -186,8 +207,12 @@ export const useSimpleAI = (difficulty = 'intermediate') => {
   const resetAI = () => {
     setBestMove(null);
     setIsThinking(false);
+    setEngineInfo(null);
     console.log('🔄 AI reset');
   };
+
+  // Get current difficulty configuration
+  const currentConfig = DIFFICULTY_SETTINGS[difficulty] || DIFFICULTY_SETTINGS.intermediate;
 
   return {
     isReady,
@@ -196,10 +221,17 @@ export const useSimpleAI = (difficulty = 'intermediate') => {
     isThinking,
     resetAI,
     setBestMove,
-    eloRating: difficulty === 'beginner' ? 1000 : difficulty === 'intermediate' ? 1400 : difficulty === 'advanced' ? 1800 : difficulty === 'master' ? 2200 : 2600,
+    eloRating: engineInfo?.eloRating || currentConfig.eloRating,
+    engineInfo,
     currentSettings: { 
-      depth: difficulty === 'beginner' ? 8 : difficulty === 'intermediate' ? 12 : difficulty === 'advanced' ? 15 : difficulty === 'master' ? 18 : 20,
-      engine: 'Stockfish with Simple AI fallback'
-    }
+      difficulty,
+      eloRating: currentConfig.eloRating,
+      depth: currentConfig.depth,
+      timeLimit: currentConfig.timeLimit,
+      skillLevel: currentConfig.skillLevel,
+      engine: engineInfo?.engine || 'Stockfish with Simple AI fallback',
+      strength: difficulty === 'superhuman' || difficulty === 'maximum' ? 'UNLIMITED' : `${currentConfig.eloRating} ELO`
+    },
+    availableDifficulties: Object.keys(DIFFICULTY_SETTINGS)
   };
 };

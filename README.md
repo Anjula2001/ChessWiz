@@ -10,8 +10,10 @@ A modern, full-stack chess application with an intelligent AI opponent powered b
 ## ✨ Features
 
 ### 🎮 Game Features
-- **Intelligent AI Opponent**: Powered by Stockfish chess engine
-- **Multiple Difficulty Levels**: From beginner to grandmaster (800-2800+ ELO)
+- **Intelligent AI Opponent**: Powered by latest Stockfish dev-20250702-ce73441f
+- **Advanced Difficulty Levels**: 8 levels from beginner (1000 ELO) to maximum (3500+ ELO)
+- **3000+ ELO Engine Support**: Superhuman (3200 ELO) and Maximum (3500+ ELO) difficulty
+- **Unlimited Strength Mode**: Full engine power for highest difficulties
 - **Flexible Player Color**: Play as White, Black, or Random
 - **Real-time Move Validation**: Legal move checking with chess.js
 - **Game Statistics**: Track your wins, losses, and draws
@@ -27,10 +29,13 @@ A modern, full-stack chess application with an intelligent AI opponent powered b
 
 ### 🔧 Technical Features
 - **Full-stack Architecture**: React frontend + Express.js backend
-- **Stockfish Integration**: Professional chess engine via Node.js
+- **Latest Stockfish Integration**: dev-20250702-ce73441f with optimized settings
+- **3000+ ELO Support**: Superhuman AI with unlimited strength mode
+- **Enhanced Error Handling**: No more 500 errors, comprehensive fallback responses
+- **Multi-threaded Analysis**: 8-thread parallel processing with 1GB hash
 - **Real-time Communication**: REST API for move analysis
 - **Persistent Statistics**: Local storage for game tracking
-- **Error Handling**: Comprehensive error management
+- **Professional Engine Configuration**: Optimized for maximum performance
 
 ## 🚀 Quick Start
 

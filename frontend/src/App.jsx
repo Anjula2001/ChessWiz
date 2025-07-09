@@ -15,13 +15,20 @@ function App() {
     setCurrentView('mode-selection');
   };
 
-  const handleSelectMode = (mode, color) => {
+  const handleSelectMode = (mode, color, difficulty) => {
     setSelectedColor(color);
+    if (difficulty) {
+      setSelectedDifficulty(difficulty);
+    }
     if (mode === 'single') {
       setCurrentView('single-player');
     } else if (mode === 'multiplayer') {
       setCurrentView('multiplayer');
     }
+  };
+
+  const handleDifficultyChange = (difficulty) => {
+    setSelectedDifficulty(difficulty);
   };
 
   const handleBackToHome = () => {
@@ -45,6 +52,7 @@ function App() {
           selectedDifficulty={selectedDifficulty}
           onBackToHome={handleBackToHome}
           onSelectMode={handleSelectMode}
+          onDifficultyChange={handleDifficultyChange}
         />
       )}
       
