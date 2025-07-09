@@ -1,0 +1,366 @@
+/* HomePage.css - Beautiful landing page styles for ChessWiz */
+
+.home-page {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  color: white;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  overflow-x: hidden;
+}
+
+.hero-section {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 2rem;
+  position: relative;
+}
+
+.hero-section::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="chess" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse"><rect x="0" y="0" width="10" height="10" fill="rgba(255,255,255,0.02)"/><rect x="10" y="10" width="10" height="10" fill="rgba(255,255,255,0.02)"/></pattern></defs><rect width="100" height="100" fill="url(%23chess)"/></svg>') repeat;
+  opacity: 0.1;
+  z-index: 0;
+}
+
+.hero-content {
+  max-width: 1200px;
+  width: 100%;
+  text-align: center;
+  position: relative;
+  z-index: 1;
+}
+
+.logo-section {
+  margin-bottom: 3rem;
+}
+
+.chess-pieces {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+}
+
+/* SIMPLE UP AND DOWN ANIMATION FOR CHESS PIECES */
+.chess-pieces .piece {
+  display: inline-block !important;
+  animation: moveUpDown 3s ease-in-out infinite !important;
+  font-size: 3rem !important;
+}
+
+.chess-pieces .piece.king { 
+  animation-delay: 0s !important;
+  color: #ffd700 !important;
+}
+
+.chess-pieces .piece.queen { 
+  animation-delay: 1s !important;
+  color: #e6e6fa !important;
+}
+
+.chess-pieces .piece.rook { 
+  animation-delay: 2s !important;
+  color: #daa520 !important;
+}
+
+@keyframes moveUpDown {
+  0% { 
+    transform: translateY(0px); 
+  }
+  50% { 
+    transform: translateY(-30px); 
+  }
+  100% { 
+    transform: translateY(0px); 
+  }
+}
+
+.main-title {
+  font-size: 4.5rem;
+  font-weight: 800;
+  margin: 1rem 0;
+  letter-spacing: -2px;
+  line-height: 1.1;
+}
+
+.chess-text {
+  color: #ffffff;
+  text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+}
+
+.wiz-text {
+  color: #ffd700;
+  background: linear-gradient(45deg, #ffd700, #ffed4e);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-shadow: none;
+}
+
+.subtitle {
+  font-size: 1.3rem;
+  color: #b8c6db;
+  margin-bottom: 3rem;
+  font-weight: 300;
+}
+
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 2rem;
+  margin-bottom: 0;
+  max-width: 900px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.feature-card {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 2rem;
+  text-align: center;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: all 0.3s ease;
+}
+
+.feature-card:hover {
+  transform: translateY(-5px);
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+.feature-icon {
+  font-size: 2.5rem;
+  margin-bottom: 1rem;
+}
+
+.feature-card h3 {
+  font-size: 1.3rem;
+  margin-bottom: 0.8rem;
+  color: #ffffff;
+}
+
+.feature-card p {
+  color: #b8c6db;
+  line-height: 1.5;
+}
+
+.game-setup {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.game-setup h2 {
+  font-size: 2.5rem;
+  margin-bottom: 2rem;
+  color: #ffffff;
+}
+
+.difficulty-selector {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 1rem;
+  margin-bottom: 3rem;
+}
+
+.difficulty-card {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 1.5rem 1rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  border: 2px solid transparent;
+  backdrop-filter: blur(5px);
+}
+
+.difficulty-card:hover {
+  background: rgba(255, 255, 255, 0.1);
+  transform: scale(1.02);
+}
+
+.difficulty-card.selected {
+  background: rgba(255, 215, 0, 0.15);
+  border-color: #ffd700;
+  box-shadow: 0 0 20px rgba(255, 215, 0, 0.3);
+}
+
+.difficulty-icon {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+}
+
+.difficulty-info h4 {
+  font-size: 1.1rem;
+  margin-bottom: 0.3rem;
+  color: #ffffff;
+}
+
+.difficulty-elo {
+  font-size: 0.9rem;
+  color: #ffd700;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.difficulty-info p {
+  font-size: 0.8rem;
+  color: #b8c6db;
+  line-height: 1.3;
+}
+
+.play-button {
+  background: linear-gradient(45deg, #ff6b6b, #ffd93d);
+  border: none;
+  border-radius: 50px;
+  padding: 1.2rem 3rem;
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: #1a1a2e;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.8rem;
+  margin: 0 auto;
+  box-shadow: 0 8px 25px rgba(255, 107, 107, 0.3);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.play-button:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 35px rgba(255, 107, 107, 0.4);
+  background: linear-gradient(45deg, #ff5252, #ffeb3b);
+}
+
+.play-button:active {
+  transform: translateY(-1px);
+}
+
+.play-icon {
+  font-size: 1.1rem;
+}
+
+.cta-section {
+  margin: 2rem 0;
+  text-align: center;
+}
+
+.cta-subtitle {
+  font-size: 1rem;
+  color: #b8c6db;
+  margin-top: 1rem;
+  margin-bottom: 0;
+  font-weight: 300;
+}
+
+.stats-section {
+  background: rgba(0, 0, 0, 0.2);
+  padding: 3rem 2rem;
+  margin-top: 2rem;
+}
+
+.stats-container {
+  max-width: 800px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 2rem;
+}
+
+.stat-item {
+  text-align: center;
+}
+
+.stat-number {
+  font-size: 3rem;
+  font-weight: 800;
+  color: #ffd700;
+  line-height: 1;
+  margin-bottom: 0.5rem;
+}
+
+.stat-label {
+  font-size: 1.1rem;
+  color: #b8c6db;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.footer {
+  text-align: center;
+  padding: 2rem;
+  color: #7c8db5;
+  font-style: italic;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .main-title {
+    font-size: 3rem;
+  }
+  
+  .hero-section {
+    padding: 2rem 1rem;
+  }
+  
+  .features-grid {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+  
+  .difficulty-selector {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  .play-button {
+    padding: 1rem 2.5rem;
+    font-size: 1.1rem;
+  }
+  
+  .cta-subtitle {
+    font-size: 0.9rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .main-title {
+    font-size: 2.5rem;
+  }
+  
+  .hero-section {
+    padding: 1.5rem 1rem;
+  }
+  
+  .difficulty-selector {
+    grid-template-columns: 1fr;
+  }
+  
+  .chess-pieces {
+    font-size: 2rem;
+  }
+  
+  .feature-card {
+    padding: 1.5rem;
+  }
+  
+  .play-button {
+    padding: 0.9rem 2rem;
+    font-size: 1rem;
+  }
+  
+  .cta-subtitle {
+    font-size: 0.85rem;
+  }
+}

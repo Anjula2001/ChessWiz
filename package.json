@@ -1,0 +1,42 @@
+{
+  "name": "chesswizzz",
+  "version": "1.0.0",
+  "description": "A modern full-stack chess application with intelligent AI opponent",
+  "private": true,
+  "scripts": {
+    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build",
+    "start": "concurrently \"npm run start:backend\" \"npm run start:frontend\"",
+    "start:backend": "cd backend && npm start",
+    "start:frontend": "cd frontend && npm run preview",
+    "test": "cd backend && npm test && cd ../frontend && npm test"
+  },
+  "keywords": [
+    "chess",
+    "react",
+    "nodejs",
+    "stockfish",
+    "game",
+    "ai"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=7.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/chesswizzz.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/chesswizzz/issues"
+  },
+  "homepage": "https://github.com/yourusername/chesswizzz#readme"
+}
