@@ -222,7 +222,7 @@ function ChessGame({ difficulty, playerColor, onBackToHome }) {
           setTimeout(() => {
             console.log('🔄 Calling getBestMove...');
             getBestMove(newGame.fen());
-          }, 1000); // Increased delay for stability
+          }, 300); // Reduced delay for faster response
         } else {
           console.log(`❌ AI move not triggered because:`, {
             wrongTurn: currentTurn !== aiColor,
@@ -299,7 +299,7 @@ function ChessGame({ difficulty, playerColor, onBackToHome }) {
         console.log('Player is black and Chess Engine is ready, requesting AI first move...');
         setTimeout(() => {
           getBestMove(newGame.fen());
-        }, 1000);
+        }, 300);
       } else if (actualPlayerColor === 'black' && !isReady) {
         console.log('Player is black but Chess Engine not ready yet, waiting...');
         setTimeout(checkAndMakeAIMove, 1000);
@@ -341,7 +341,7 @@ function ChessGame({ difficulty, playerColor, onBackToHome }) {
     if (actualPlayerColor === 'black' && isReady) {
       setTimeout(() => {
         getBestMove(newGame.fen());
-      }, 500);
+      }, 300);
     }
   };
 

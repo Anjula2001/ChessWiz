@@ -352,7 +352,7 @@ app.post('/getBestMove', async (req, res) => {
       engine: 'Stockfish dev-20250702-ce73441f',
       version: 'development',
       strength: difficulty === 'superhuman' || difficulty === 'maximum' ? 'UNLIMITED' : `${difficultyConfig.eloRating} ELO`,
-      message: `Best move calculated at ${difficulty} level`,
+      message: `Best move calculated at ${difficulty} level (${difficultyConfig.eloRating} ELO)`,
       success: true
     });
 

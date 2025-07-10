@@ -161,14 +161,8 @@ function GameModeSelection({ selectedDifficulty, onBackToHome, onSelectMode, onD
                   className={`difficulty-option ${selectedDifficulty === level.id ? 'selected' : ''}`}
                   onClick={() => onDifficultyChange && onDifficultyChange(level.id)}
                 >
-                  <div className="difficulty-icon">{level.icon}</div>
-                  <div className="difficulty-info">
-                    <h4>{level.name}</h4>
-                    <p>{level.elo}</p>
-                  </div>
-                  <div className={`difficulty-radio ${selectedDifficulty === level.id ? 'checked' : ''}`}>
-                    {selectedDifficulty === level.id && <div className="radio-dot"></div>}
-                  </div>
+                  <h4>{level.name}</h4>
+                  <p>{level.elo}</p>
                 </div>
               ))}
             </div>

@@ -25,6 +25,11 @@ const getStockfishMove = async (fen, difficulty = 'intermediate') => {
     const data = await response.json();
     console.log('📡 Backend response:', data);
     
+    // Verify that the difficulty returned matches what was requested
+    if (data.difficulty && data.difficulty !== difficulty) {
+      console.warn(`⚠️ Difficulty mismatch: requested ${difficulty} but got ${data.difficulty}`);
+    }
+    
     if (data.bestMove && data.bestMove !== '(none)') {
       return {
         move: data.bestMove,
@@ -32,7 +37,9 @@ const getStockfishMove = async (fen, difficulty = 'intermediate') => {
         analysisTime: data.analysisTime,
         depth: data.analysisDepth,
         strength: data.strength,
-        engine: data.engine
+        engine: data.engine,
+        difficulty: data.difficulty, // Add difficulty to the return data
+        message: data.message // Include the message from backend
       };
     } else {
       throw new Error('No valid move received from backend');
@@ -118,14 +125,14 @@ export const useSimpleAI = (difficulty = 'intermediate') => {
 
   // Define the complete difficulty mapping that matches backend
   const DIFFICULTY_SETTINGS = {
-    beginner: { eloRating: 1000, depth: 6, timeLimit: 500, skillLevel: 5 },
-    easy: { eloRating: 1300, depth: 8, timeLimit: 800, skillLevel: 10 },
-    intermediate: { eloRating: 1600, depth: 10, timeLimit: 1200, skillLevel: 15 },
-    advanced: { eloRating: 2000, depth: 12, timeLimit: 2000, skillLevel: 18 },
-    expert: { eloRating: 2400, depth: 15, timeLimit: 3000, skillLevel: 20 },
-    grandmaster: { eloRating: 2800, depth: 18, timeLimit: 5000, skillLevel: 20 },
-    superhuman: { eloRating: 3200, depth: 22, timeLimit: 8000, skillLevel: 20 },
-    maximum: { eloRating: 3500, depth: 25, timeLimit: 12000, skillLevel: 20 }
+    beginner: { eloRating: 1000, depth: 6, timeLimit: 300, skillLevel: 5 },
+    easy: { eloRating: 1300, depth: 8, timeLimit: 400, skillLevel: 10 },
+    intermediate: { eloRating: 1600, depth: 10, timeLimit: 500, skillLevel: 15 },
+    advanced: { eloRating: 2000, depth: 12, timeLimit: 700, skillLevel: 18 },
+    expert: { eloRating: 2400, depth: 15, timeLimit: 1000, skillLevel: 20 },
+    grandmaster: { eloRating: 2800, depth: 18, timeLimit: 1500, skillLevel: 20 },
+    superhuman: { eloRating: 3200, depth: 22, timeLimit: 2000, skillLevel: 20 },
+    maximum: { eloRating: 3500, depth: 25, timeLimit: 3000, skillLevel: 20 }
   };
 
   useEffect(() => {
@@ -153,8 +160,14 @@ export const useSimpleAI = (difficulty = 'intermediate') => {
         const stockfishResult = await getStockfishMove(fen, difficulty);
         if (stockfishResult && stockfishResult.move) {
           setBestMove(stockfishResult.move);
-          setEngineInfo(stockfishResult);
-          console.log(`🎯 Stockfish move (${difficulty}):`, stockfishResult.move, `(${stockfishResult.eloRating} ELO)`);
+          setEngineInfo({
+            ...stockfishResult,
+            difficulty: stockfishResult.difficulty || difficulty // Use returned difficulty or fallback to requested
+          });
+          console.log(`🎯 Stockfish move (${stockfishResult.difficulty || difficulty}):`, stockfishResult.move, `(${stockfishResult.eloRating} ELO)`);
+          if (stockfishResult.message) {
+            console.log(`💬 Engine message: ${stockfishResult.message}`);
+          }
           setIsThinking(false);
           return;
         }
@@ -167,7 +180,7 @@ export const useSimpleAI = (difficulty = 'intermediate') => {
       
       // Simulate thinking time for fallback based on difficulty
       const difficultyConfig = DIFFICULTY_SETTINGS[difficulty] || DIFFICULTY_SETTINGS.intermediate;
-      await new Promise(resolve => setTimeout(resolve, Math.min(difficultyConfig.timeLimit / 4, 2000)));
+      await new Promise(resolve => setTimeout(resolve, Math.min(difficultyConfig.timeLimit / 2, 1000)));
       
       const game = new Chess(fen);
       let move;
