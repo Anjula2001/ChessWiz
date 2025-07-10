@@ -1,9 +1,19 @@
 const express = require('express');
 const cors = require('cors');
 const { spawn } = require('child_process');
+const http = require('http');
+const socketIo = require('socket.io');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const server = http.createServer(app);
+const io = socketIo(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST'],
+    credentials: true
+  }
+});
 
 // Middleware
 app.use(cors());
@@ -224,6 +234,24 @@ class StockfishManager {
 // Initialize Stockfish manager
 const stockfish = new StockfishManager();
 
+// Store the most recent physical move received from ESP microcontroller
+let lastPhysicalMove = null;
+let lastPhysicalMoveTime = null;
+
+// Periodic transfer status logging
+setInterval(() => {
+  const currentTime = new Date();
+  if (!lastPhysicalMove || !lastPhysicalMoveTime || (currentTime - lastPhysicalMoveTime) > 30000) {
+    console.log('\n' + '='.repeat(60));
+    console.log('📡 TRANSFER STATUS (SERVER) 📡');
+    console.log('transfering move is - not received');
+    console.log('='.repeat(60));
+  }
+}, 30000); // Check every 30 seconds
+
+// Socket.io game rooms and state management
+const gameRooms = new Map(); // Store active game rooms
+
 // Health check endpoint
 app.get('/', (req, res) => {
   res.json({ 
@@ -401,6 +429,105 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Physical Move endpoint - Receives moves from ESP microcontroller
+app.post('/physicalMove', (req, res) => {
+  try {
+    const { move, roomId = 'default', playerSide = 'white' } = req.body;
+    
+    // Enhanced transfer status logging
+    console.log('\n' + '='.repeat(60));
+    console.log('📡 TRANSFER STATUS (SERVER) 📡');
+    console.log(`transfering move is - ${move || 'not received'}`);
+    console.log('='.repeat(60));
+    
+    // Validate the move format (e.g., "e2-e4")
+    if (!move || typeof move !== 'string' || !move.match(/^[a-h][1-8]-[a-h][1-8]$/)) {
+      console.log('❌ TRANSFER FAILED - Invalid move format');
+      console.log(`📡 TRANSFER STATUS: transfering move is - not received (invalid format: ${move})`);
+      return res.status(400).json({ 
+        error: 'Invalid move format',
+        message: 'Move should be in format like "e2-e4"',
+        received: move
+      });
+    }
+    
+    // Store the received move
+    lastPhysicalMove = move;
+    lastPhysicalMoveTime = new Date();
+    console.log(`🎮 Physical move received from ESP: ${move} (${playerSide} player)`);
+    console.log(`📡 TRANSFER STATUS: transfering move is - ${move} (received from ESP)`);
+    
+    // Convert from "e2-e4" format to "e2e4" format if needed
+    const normalizedMove = move.replace('-', '');
+    
+    // Broadcast the move to all clients in the multiplayer room
+    if (gameRooms.has(roomId)) {
+      const gameRoom = gameRooms.get(roomId);
+      gameRoom.lastMove = normalizedMove;
+      gameRoom.moves.push(normalizedMove);
+      
+      console.log(`♟️ Physical move in room ${roomId}: ${normalizedMove} for ${playerSide} player`);
+      console.log(`📡 TRANSFER STATUS: transfering move is - ${move} (broadcasting to room ${roomId})`);
+      
+      io.to(roomId).emit('physicalMove', { 
+        move: normalizedMove, 
+        source: 'esp',
+        playerSide: playerSide,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Also broadcast as a regular move for compatibility
+      io.to(roomId).emit('moveMade', { 
+        move: normalizedMove, 
+        fromESP: true,
+        playerSide: playerSide
+      });
+      
+      console.log(`✅ TRANSFER SUCCESS: transfering move is - ${move} (successfully broadcast)`);
+    } else {
+      console.log(`⚠️ Room ${roomId} not found, broadcasting to all rooms`);
+      console.log(`📡 TRANSFER STATUS: transfering move is - ${move} (broadcasting to all clients)`);
+      
+      // If no specific room, broadcast to all clients
+      io.emit('physicalMove', { 
+        move: normalizedMove, 
+        source: 'esp',
+        playerSide: playerSide,
+        timestamp: new Date().toISOString()
+      });
+      
+      console.log(`✅ TRANSFER SUCCESS: transfering move is - ${move} (broadcast to all clients)`);
+    }
+    
+    // Return success response
+    res.status(200).json({
+      success: true,
+      move: move,
+      normalizedMove: normalizedMove,
+      timestamp: new Date().toISOString(),
+      roomId: roomId,
+      message: `Move ${move} successfully received and broadcast to multiplayer room`
+    });
+    
+  } catch (error) {
+    console.error('❌ Error processing physical move:', error.message);
+    res.status(500).json({
+      error: 'Failed to process physical move',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Get last physical move endpoint
+app.get('/getPhysicalMove', (req, res) => {
+  res.json({
+    move: lastPhysicalMove,
+    timestamp: new Date().toISOString(),
+    available: lastPhysicalMove !== null
+  });
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('🚨 Server error:', err.stack);
@@ -414,19 +541,33 @@ app.use((err, req, res, next) => {
 app.use('*', (req, res) => {
   res.status(404).json({ 
     error: 'Endpoint not found',
-    availableEndpoints: ['GET /', 'GET /health', 'GET /engine-info', 'POST /getBestMove']
+    availableEndpoints: [
+      'GET /', 
+      'GET /health', 
+      'GET /engine-info', 
+      'POST /getBestMove',
+      'POST /physicalMove',
+      'GET /getPhysicalMove'
+    ]
   });
 });
 
 // Start server
-const server = app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log('🎮 ==========================================');
   console.log(`🎯 Chesswizzz Backend Server started!`);
   console.log(`🌐 Server URL: http://localhost:${PORT}`);
   console.log(`🩺 Health check: http://localhost:${PORT}/health`);
   console.log(`♟️  Chess API: http://localhost:${PORT}/getBestMove`);
   console.log(`⚙️  Engine Info: http://localhost:${PORT}/engine-info`);
+  console.log(`🎛️  Physical moves: http://localhost:${PORT}/physicalMove`);
   console.log('🎮 ==========================================');
+  
+  // Show initial transfer status
+  console.log('\n' + '='.repeat(60));
+  console.log('📡 TRANSFER STATUS (SERVER) 📡');
+  console.log('transfering move is - not received');
+  console.log('='.repeat(60));
 });
 
 // Graceful shutdown
@@ -446,5 +587,89 @@ const gracefulShutdown = (signal) => {
 
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+// Socket.io connection handler
+
+// Socket.io connection handler
+io.on('connection', (socket) => {
+  console.log(`🔌 New client connected: ${socket.id}`);
+  
+  // Join a game room
+  socket.on('joinGame', (roomId) => {
+    socket.join(roomId);
+    
+    if (!gameRooms.has(roomId)) {
+      gameRooms.set(roomId, {
+        players: [],
+        currentFen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', // Starting position
+        moves: [],
+        lastMove: null
+      });
+    }
+    
+    const gameRoom = gameRooms.get(roomId);
+    if (gameRoom.players.length < 2) {
+      gameRoom.players.push(socket.id);
+    }
+    
+    console.log(`👤 Player ${socket.id} joined room ${roomId}`);
+    io.to(roomId).emit('gameState', gameRoom);
+  });
+  
+  // Handle player move
+  socket.on('move', ({ roomId, move, fen }) => {
+    if (gameRooms.has(roomId)) {
+      const gameRoom = gameRooms.get(roomId);
+      gameRoom.lastMove = move;
+      gameRoom.currentFen = fen;
+      gameRoom.moves.push(move);
+      
+      console.log(`♟️ Move in room ${roomId}: ${move}`);
+      io.to(roomId).emit('moveMade', { move, fen });
+      io.to(roomId).emit('gameState', gameRoom);
+    }
+  });
+  
+  // Handle new game start - clear physical move state
+  socket.on('newGame', (roomId) => {
+    console.log(`🔄 New game started in room ${roomId} - clearing physical move state`);
+    lastPhysicalMove = null; // Clear the global physical move
+    
+    if (gameRooms.has(roomId)) {
+      const gameRoom = gameRooms.get(roomId);
+      gameRoom.currentFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'; // Reset to starting position
+      gameRoom.moves = [];
+      gameRoom.lastMove = null;
+      
+      // Broadcast new game state to all players in the room
+      io.to(roomId).emit('gameState', gameRoom);
+      io.to(roomId).emit('newGameStarted', { roomId });
+    }
+  });
+  
+  // Handle disconnection
+  socket.on('disconnect', () => {
+    console.log(`🔌 Client disconnected: ${socket.id}`);
+    
+    // Remove player from any game rooms
+    for (const [roomId, gameRoom] of gameRooms.entries()) {
+      const playerIndex = gameRoom.players.indexOf(socket.id);
+      if (playerIndex !== -1) {
+        gameRoom.players.splice(playerIndex, 1);
+        console.log(`👤 Player ${socket.id} removed from room ${roomId}`);
+        
+        // Notify remaining players
+        io.to(roomId).emit('playerLeft', { playerId: socket.id });
+        io.to(roomId).emit('gameState', gameRoom);
+        
+        // Remove empty rooms
+        if (gameRoom.players.length === 0) {
+          gameRooms.delete(roomId);
+          console.log(`🧹 Empty room ${roomId} removed`);
+        }
+      }
+    }
+  });
+});
 
 module.exports = { app, stockfish };

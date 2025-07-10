@@ -34,7 +34,6 @@ function MultiplayerChess({ playerColor, onBackToHome }) {
   const [actualPlayerColor, setActualPlayerColor] = useState('white');
   const [roomId, setRoomId] = useState('default');
   const [lastPhysicalMove, setLastPhysicalMove] = useState(null);
-  const [physicalMoveApplied, setPhysicalMoveApplied] = useState(false);
   const [connected, setConnected] = useState(false);
   
   // Initialize game stats from localStorage or default values
@@ -207,17 +206,13 @@ function MultiplayerChess({ playerColor, onBackToHome }) {
   const handleDragStart = (e, square) => {
     const piece = pieces[square];
     const playerColorCode = actualPlayerColor === 'white' ? 'w' : 'b';
-    
     // Only allow bottom player's pieces to be dragged when it's their turn
     if (!piece || piece[0] !== playerColorCode || game.turn() !== playerColorCode) {
-      console.log(`Drag prevented: piece=${piece}, piece color=${piece?.[0]}, player color=${playerColorCode}, turn=${game.turn()}`);
       e.preventDefault();
       return;
     }
     
-    console.log(`Drag started: ${square} with piece ${piece}`);
     setDraggedPiece({ square, piece });
-    
     // Get valid moves for this piece
     const moves = game.moves({ square, verbose: true });
     setValidMoves(moves.map(move => move.to));
@@ -237,7 +232,6 @@ function MultiplayerChess({ playerColor, onBackToHome }) {
     if (!draggedPiece) return;
     
     const { square: fromSquare } = draggedPiece;
-    console.log(`Attempting move from ${fromSquare} to ${targetSquare}`);
     
     try {
       // Attempt the move
@@ -248,10 +242,9 @@ function MultiplayerChess({ playerColor, onBackToHome }) {
       });
       
       if (moveAttempt) {
-        console.log(`Move successful: ${moveAttempt.san}`);
         const newGame = new Chess(game.fen());
         setGame(newGame);
-        updateBoardState(newGame);
+        updateBoardState();
         
         // Add to move history
         setMoveHistory(prev => [
@@ -264,18 +257,6 @@ function MultiplayerChess({ playerColor, onBackToHome }) {
             to: moveAttempt.to
           }
         ]);
-        
-        // Broadcast the move to other players
-        if (connected) {
-          console.log(`Broadcasting move to room ${roomId}: ${moveAttempt.san}`);
-          socket.emit('move', {
-            roomId,
-            move: moveAttempt.san,
-            fen: newGame.fen()
-          });
-        }
-      } else {
-        console.log(`Invalid move from ${fromSquare} to ${targetSquare}`);
       }
     } catch (error) {
       console.log('Invalid drag move:', error.message);
@@ -338,16 +319,7 @@ function MultiplayerChess({ playerColor, onBackToHome }) {
     setGame(newGame);
     setMoveHistory([]);
     setMoveInput('');
-    // Clear physical move alerts when starting a new game
-    setLastPhysicalMove(null);
-    setPhysicalMoveApplied(false);
     updateBoardState(newGame);
-    
-    // Notify backend that a new game has started to clear physical move state
-    if (connected) {
-      socket.emit('newGame', roomId);
-      console.log('🔄 Notified backend of new game start');
-    }
   };
 
   useEffect(() => {
@@ -355,23 +327,6 @@ function MultiplayerChess({ playerColor, onBackToHome }) {
     const newGame = new Chess();
     setGame(newGame);
     updateBoardState(newGame);
-    
-    // Clear any physical move state on component mount
-    setLastPhysicalMove(null);
-    setPhysicalMoveApplied(false);
-    
-    // Set up periodic transfer status logging (every 30 seconds)
-    const transferStatusInterval = setInterval(() => {
-      if (!lastPhysicalMove) {
-        console.log('%c📡 TRANSFER STATUS 📡', 'background: #9b59b6; color: white; padding: 5px; border-radius: 5px; font-weight: bold; font-size: 14px');
-        console.log('transfering move is - not received');
-      }
-    }, 30000); // 30 seconds
-    
-    // Cleanup interval on unmount
-    return () => {
-      clearInterval(transferStatusInterval);
-    };
   }, []);
 
   // Save game stats to localStorage whenever they change
@@ -448,8 +403,8 @@ function MultiplayerChess({ playerColor, onBackToHome }) {
         >
           {piece && (
             <div 
-              className={`piece ${piece[0] === (actualPlayerColor === 'white' ? 'w' : 'b') ? 'draggable' : ''}`}
-              draggable={piece[0] === (actualPlayerColor === 'white' ? 'w' : 'b')}
+              className={`piece ${piece[0] === (actualPlayerColor === 'white' ? 'w' : 'b') && game.turn() === (actualPlayerColor === 'white' ? 'w' : 'b') ? 'draggable' : ''}`}
+              draggable={piece[0] === (actualPlayerColor === 'white' ? 'w' : 'b') && game.turn() === (actualPlayerColor === 'white' ? 'w' : 'b')}
               onDragStart={(e) => handleDragStart(e, squareName)}
               onDragEnd={handleDragEnd}
             >
@@ -468,10 +423,6 @@ function MultiplayerChess({ playerColor, onBackToHome }) {
     socket.emit('joinGame', roomId);
     setConnected(true);
     
-    // Show initial transfer status when component mounts
-    console.log('%c📡 TRANSFER STATUS 📡', 'background: #9b59b6; color: white; padding: 5px; border-radius: 5px; font-weight: bold; font-size: 14px');
-    console.log('transfering move is - not received');
-    
     // Handle incoming moves from other players
     socket.on('moveMade', ({ move, fromESP }) => {
       console.log(`Received move from ${fromESP ? 'ESP device' : 'other player'}: ${move}`);
@@ -482,141 +433,10 @@ function MultiplayerChess({ playerColor, onBackToHome }) {
     });
     
     // Handle physical moves from ESP device
-    socket.on('physicalMove', ({ move, playerSide, source, timestamp }) => {
-      // Show transfer status immediately when move is received
-      console.log('%c📡 TRANSFER STATUS 📡', 'background: #9b59b6; color: white; padding: 5px; border-radius: 5px; font-weight: bold; font-size: 14px');
-      console.log(`transfering move is - ${move}`);
-      
-      // Check if this is an old stored move (stale data) or a fresh move
-      const moveTimestamp = timestamp ? new Date(timestamp) : new Date();
-      const currentTime = new Date();
-      const isStaleMove = (currentTime - moveTimestamp) > 10000; // More than 10 seconds old
-      
-      // Enhanced browser console logging
-      console.log('%c🎮 PHYSICAL MOVE RECEIVED 🎮', 'background: #3498db; color: white; padding: 5px; border-radius: 5px; font-weight: bold; font-size: 14px');
-      console.log(`📥 Move: ${move} | Player Side: ${playerSide} | Source: ${source || 'unknown'} | Time: ${timestamp || new Date().toISOString()}`);
-      
-      // Ignore stale moves from previous sessions
-      if (isStaleMove) {
-        console.log('%c⏰ IGNORING STALE MOVE ⏰', 'background: #f39c12; color: white; padding: 5px; border-radius: 5px; font-weight: bold; font-size: 14px');
-        console.log(`Move ${move} is stale (received from server cache, not a real-time event)`);
-        console.log('%c📡 TRANSFER STATUS 📡', 'background: #9b59b6; color: white; padding: 5px; border-radius: 5px; font-weight: bold; font-size: 14px');
-        console.log('transfering move is - not received (stale move ignored)');
-        return;
-      }
-      
+    socket.on('physicalMove', ({ move }) => {
+      console.log('Received physical move from ESP:', move);
       setLastPhysicalMove(move);
-      setPhysicalMoveApplied(false);
-      
-      // Determine the top player's color based on frontend player's choice
-      // If frontend player chose white, top player is black
-      // If frontend player chose black, top player is white
-      const topPlayerColor = actualPlayerColor === 'white' ? 'black' : 'white';
-      const topPlayerColorCode = topPlayerColor === 'white' ? 'w' : 'b';
-      
-      // Check whose turn it is currently
-      const currentTurn = game.turn();
-      
-      console.log(`🎯 ESP Move Analysis: Frontend Player: ${actualPlayerColor} | Top Player: ${topPlayerColor} | Current Turn: ${currentTurn === 'w' ? 'white' : 'black'}`);
-      console.log(`📋 Move Logic: ESP move "${move}" is for top player (${topPlayerColor}). Will apply only if it's ${topPlayerColor}'s turn.`);
-      
-      // ESP moves are ALWAYS for the top player
-      // Only apply the move if it's currently the top player's turn
-      if (currentTurn === topPlayerColorCode) {
-        console.log(`✅ Applying physical move for top player (${topPlayerColor}): ${move}`);
-        
-        // Handle moves in format "e2-e4" by converting to object format
-        let from, to;
-        if (move.includes('-')) {
-          [from, to] = move.split('-');
-        } else if (move.match(/^([a-h][1-8])([a-h][1-8])$/)) {
-          from = move.substring(0, 2);
-          to = move.substring(2, 4);
-        } else {
-          console.log('%c❌ INVALID MOVE FORMAT ❌', 'background: #e74c3c; color: white; padding: 5px; border-radius: 5px; font-weight: bold; font-size: 14px');
-          console.log(`🚫 Format error: ${move} - Move should be in format "e2-e4" or "e2e4"`);
-          setPhysicalMoveApplied(false);
-          
-          // Show transfer status for invalid format
-          console.log('%c📡 TRANSFER STATUS 📡', 'background: #9b59b6; color: white; padding: 5px; border-radius: 5px; font-weight: bold; font-size: 14px');
-          console.log(`transfering move is - ${move} (invalid format)`);
-          return;
-        }
-        
-        // Try to make the move directly using from-to object notation
-        try {
-          const moveAttempt = game.move({
-            from: from,
-            to: to,
-            promotion: 'q'  // Default to queen for pawn promotion
-          });
-          
-          if (moveAttempt) {
-            const newGame = new Chess(game.fen());
-            setGame(newGame);
-            updateBoardState(newGame);
-            setPhysicalMoveApplied(true);
-            
-            // Add to move history
-            setMoveHistory(prev => [
-              ...prev,
-              {
-                moveNumber: Math.ceil(game.history().length / 2),
-                move: moveAttempt.san,
-                color: moveAttempt.color,
-                from: moveAttempt.from,
-                to: moveAttempt.to
-              }
-            ]);
-            
-            // Enhanced success logging with more details
-            console.log('%c✅ PHYSICAL MOVE APPLIED ✅', 'background: #27ae60; color: white; padding: 5px; border-radius: 5px; font-weight: bold; font-size: 14px');
-            console.log(`📊 Details: Move ${move} | Top Player: ${topPlayerColor} | Piece: ${moveAttempt.piece} | From: ${moveAttempt.from} | To: ${moveAttempt.to} | Capture: ${moveAttempt.captured ? 'Yes' : 'No'}`);
-            
-            // Show final transfer status after successful application
-            console.log('%c📡 TRANSFER STATUS 📡', 'background: #9b59b6; color: white; padding: 5px; border-radius: 5px; font-weight: bold; font-size: 14px');
-            console.log(`transfering move is - ${move} (successfully applied)`);
-            
-            // Broadcast the move to other players
-            if (connected) {
-              socket.emit('move', {
-                roomId,
-                move: moveAttempt.san,
-                fen: newGame.fen()
-              });
-            }
-          } else {
-            console.log('❌ Physical move failed to apply:', move);
-            setPhysicalMoveApplied(false);
-            
-            // Show transfer status for failed move
-            console.log('%c📡 TRANSFER STATUS 📡', 'background: #9b59b6; color: white; padding: 5px; border-radius: 5px; font-weight: bold; font-size: 14px');
-            console.log(`transfering move is - ${move} (failed to apply - invalid move)`);
-          }
-        } catch (error) {
-          console.log('❌ Error applying physical move:', move, error.message);
-          setPhysicalMoveApplied(false);
-          
-          // Show transfer status for error
-          console.log('%c📡 TRANSFER STATUS 📡', 'background: #9b59b6; color: white; padding: 5px; border-radius: 5px; font-weight: bold; font-size: 14px');
-          console.log(`transfering move is - ${move} (error occurred: ${error.message})`);
-        }
-      } else {
-        console.log('%c❌ MOVE REJECTED - WRONG TURN ❌', 'background: #e74c3c; color: white; padding: 5px; border-radius: 5px; font-weight: bold; font-size: 14px');
-        console.log(`🔄 Current turn: ${currentTurn === 'w' ? 'white' : 'black'} | Top player: ${topPlayerColor} | Frontend player: ${actualPlayerColor}`);
-        console.log(`🚫 Physical move "${move}" rejected because it's not the top player's turn`);
-        setPhysicalMoveApplied(false);
-        
-        // Show transfer status for rejected move
-        console.log('%c📡 TRANSFER STATUS 📡', 'background: #9b59b6; color: white; padding: 5px; border-radius: 5px; font-weight: bold; font-size: 14px');
-        console.log(`transfering move is - ${move} (rejected - wrong turn)`);
-      }
-      
-      // Auto-hide the physical move alert after 5 seconds
-      setTimeout(() => {
-        setLastPhysicalMove(null);
-        setPhysicalMoveApplied(false);
-      }, 5000);
+      makeMove(move, true); // true means this is a remote move
     });
     
     // Handle player leaving
@@ -640,21 +460,12 @@ function MultiplayerChess({ playerColor, onBackToHome }) {
       }
     });
     
-    // Handle new game started event from backend
-    socket.on('newGameStarted', ({ roomId: gameRoomId }) => {
-      console.log('Received new game started event from backend for room:', gameRoomId);
-      // Clear physical move alerts when backend confirms new game
-      setLastPhysicalMove(null);
-      setPhysicalMoveApplied(false);
-    });
-    
     // Clean up socket connection on unmount
     return () => {
       socket.off('moveMade');
       socket.off('physicalMove');
       socket.off('playerLeft');
       socket.off('gameState');
-      socket.off('newGameStarted');
       // Don't disconnect completely as socket might be used elsewhere
     };
   }, [game, roomId]);
@@ -679,31 +490,10 @@ function MultiplayerChess({ playerColor, onBackToHome }) {
       <div className="game-container">
         <div className="game-info-panel">
           {lastPhysicalMove && (
-            <div className={`physical-move-alert ${physicalMoveApplied ? 'move-applied' : 'move-pending'}`}>
-              <div className="physical-move-header">
-                <h3>Physical Move Received!</h3>
-                <button 
-                  className="close-alert-btn" 
-                  onClick={() => {
-                    setLastPhysicalMove(null);
-                    setPhysicalMoveApplied(false);
-                  }}
-                  title="Close alert"
-                >
-                  ✕
-                </button>
-              </div>
+            <div className="physical-move-alert">
+              <h3>Physical Move Received!</h3>
               <p>Move: <strong>{lastPhysicalMove}</strong></p>
-              <p>For: <strong>Top Player ({actualPlayerColor === 'white' ? 'Black' : 'White'})</strong></p>
-              {physicalMoveApplied ? (
-                <p className="physical-applied">✅ Move applied successfully to the board</p>
-              ) : (
-                <p className="physical-pending">❌ Move could not be applied (invalid or illegal move)</p>
-              )}
-              <p className="physical-note">📡 Move received from ESP32 device</p>
-              <p className="physical-timestamp">Time: {new Date().toLocaleTimeString()}</p>
-              <p className="physical-auto-hide">This alert will auto-hide in a few seconds</p>
-              <p className="physical-debug-note">Check browser console (F12) for detailed logs</p>
+              <p className="physical-note">Move received from ESP device</p>
             </div>
           )}
           <div className="game-stats">
