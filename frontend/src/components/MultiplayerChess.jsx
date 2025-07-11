@@ -508,6 +508,12 @@ function MultiplayerChess({ playerColor, onBackToHome }) {
       setLastPhysicalMove(move);
       setPhysicalMoveApplied(false);
       
+      // Auto-hide notification after 5 seconds
+      setTimeout(() => {
+        setLastPhysicalMove(null);
+        setPhysicalMoveApplied(false);
+      }, 5000);
+      
       // Determine the top player's color based on frontend player's choice
       // If frontend player chose white, top player is black
       // If frontend player chose black, top player is white
@@ -678,34 +684,6 @@ function MultiplayerChess({ playerColor, onBackToHome }) {
 
       <div className="game-container">
         <div className="game-info-panel">
-          {lastPhysicalMove && (
-            <div className={`physical-move-alert ${physicalMoveApplied ? 'move-applied' : 'move-pending'}`}>
-              <div className="physical-move-header">
-                <h3>Physical Move Received!</h3>
-                <button 
-                  className="close-alert-btn" 
-                  onClick={() => {
-                    setLastPhysicalMove(null);
-                    setPhysicalMoveApplied(false);
-                  }}
-                  title="Close alert"
-                >
-                  ✕
-                </button>
-              </div>
-              <p>Move: <strong>{lastPhysicalMove}</strong></p>
-              <p>For: <strong>Top Player ({actualPlayerColor === 'white' ? 'Black' : 'White'})</strong></p>
-              {physicalMoveApplied ? (
-                <p className="physical-applied">✅ Move applied successfully to the board</p>
-              ) : (
-                <p className="physical-pending">❌ Move could not be applied (invalid or illegal move)</p>
-              )}
-              <p className="physical-note">📡 Move received from ESP32 device</p>
-              <p className="physical-timestamp">Time: {new Date().toLocaleTimeString()}</p>
-              <p className="physical-auto-hide">This alert will auto-hide in a few seconds</p>
-              <p className="physical-debug-note">Check browser console (F12) for detailed logs</p>
-            </div>
-          )}
           <div className="game-stats">
             <div className="stats-header">
               <h3>Game Statistics</h3>
@@ -872,6 +850,31 @@ function MultiplayerChess({ playerColor, onBackToHome }) {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Small Physical Move Notification - Bottom Right */}
+      {lastPhysicalMove && (
+        <div className={`physical-move-notification ${physicalMoveApplied ? 'success' : 'pending'}`}>
+          <div className="notification-content">
+            <div className="notification-icon">
+              {physicalMoveApplied ? '✅' : '⏳'}
+            </div>
+            <div className="notification-text">
+              <div className="notification-title">ESP Move</div>
+              <div className="notification-move">{lastPhysicalMove}</div>
+            </div>
+            <button 
+              className="notification-close" 
+              onClick={() => {
+                setLastPhysicalMove(null);
+                setPhysicalMoveApplied(false);
+              }}
+              title="Close"
+            >
+              ✕
+            </button>
           </div>
         </div>
       )}
