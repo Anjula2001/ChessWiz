@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Chess } from 'chess.js'
 import { useSimpleAI } from '../useSimpleAI'
 import './ChessGame.css'
+import { io } from 'socket.io-client'
 import wP from '../images/wP.png'
 import wR from '../images/wR.png'
 import wN from '../images/wN.png'
@@ -21,6 +22,10 @@ const pieceImages = {
   bp: bP, br: bR, bn: bN, bb: bB, bq: bQ, bk: bK,
 };
 
+// Connect to the backend socket server for ESP support
+const SOCKET_SERVER_URL = 'http://localhost:3001';
+const socket = io(SOCKET_SERVER_URL);
+
 function ChessGame({ difficulty, playerColor, onBackToHome }) {
   const [game, setGame] = useState(new Chess());
   const [pieces, setPieces] = useState({});
@@ -33,6 +38,12 @@ function ChessGame({ difficulty, playerColor, onBackToHome }) {
   const [moveHistory, setMoveHistory] = useState([]);
   const [showEvaluation, setShowEvaluation] = useState(true);
   const [showNewGameConfirm, setShowNewGameConfirm] = useState(false);
+  
+  // ESP-related state variables
+  const [roomId, setRoomId] = useState('singleplayer-default');
+  const [lastPhysicalMove, setLastPhysicalMove] = useState(null);
+  const [physicalMoveApplied, setPhysicalMoveApplied] = useState(false);
+  const [connected, setConnected] = useState(false);
   
   // Initialize game stats from localStorage or default values
   const [gameStats, setGameStats] = useState(() => {
@@ -293,6 +304,15 @@ function ChessGame({ difficulty, playerColor, onBackToHome }) {
     setGame(newGame);
     updateBoardState();
     
+    // Connect to ESP socket for single player mode
+    socket.emit('joinGame', roomId);
+    setConnected(true);
+    console.log(`🔗 Connected to ESP socket with room: ${roomId}`);
+    
+    // Show initial transfer status
+    console.log('%c📡 ESP TRANSFER STATUS (Single Player) 📡', 'background: #9b59b6; color: white; padding: 5px; border-radius: 5px; font-weight: bold; font-size: 14px');
+    console.log('ESP transfer move is - not received');
+    
     // Wait for Chess Engine to be ready before making AI moves
     const checkAndMakeAIMove = () => {
       if (actualPlayerColor === 'black' && isReady) {
@@ -307,7 +327,120 @@ function ChessGame({ difficulty, playerColor, onBackToHome }) {
     };
     
     checkAndMakeAIMove();
-  }, [actualPlayerColor, isReady]);
+    
+    // Cleanup on unmount
+    return () => {
+      socket.off('physicalMove');
+      socket.off('newGameStarted');
+    };
+  }, [actualPlayerColor, isReady, roomId]);
+
+  // ESP Move Handler for Single Player Mode
+  useEffect(() => {
+    const handleESPMove = ({ move, playerSide, source, timestamp }) => {
+      // Show transfer status immediately when move is received
+      console.log('%c📡 ESP TRANSFER STATUS (Single Player) 📡', 'background: #9b59b6; color: white; padding: 5px; border-radius: 5px; font-weight: bold; font-size: 14px');
+      console.log(`ESP transfer move is - ${move}`);
+      
+      // Check if this is an old stored move (stale data) or a fresh move
+      const moveTimestamp = timestamp ? new Date(timestamp) : new Date();
+      const currentTime = new Date();
+      const isStaleMove = (currentTime - moveTimestamp) > 10000; // More than 10 seconds old
+      
+      // Enhanced browser console logging
+      console.log('%c🎮 ESP MOVE RECEIVED (Single Player) 🎮', 'background: #3498db; color: white; padding: 5px; border-radius: 5px; font-weight: bold; font-size: 14px');
+      console.log(`📥 Move: ${move} | Player Side: ${playerSide} | Source: ${source || 'unknown'} | Time: ${timestamp || new Date().toISOString()}`);
+      
+      // Ignore stale moves from previous sessions
+      if (isStaleMove) {
+        console.log('%c⏰ IGNORING STALE ESP MOVE ⏰', 'background: #f39c12; color: white; padding: 5px; border-radius: 5px; font-weight: bold; font-size: 14px');
+        console.log(`ESP move ${move} is stale (received from server cache, not a real-time event)`);
+        return;
+      }
+      
+      setLastPhysicalMove(move);
+      setPhysicalMoveApplied(false);
+      
+      // In single player: ESP moves are ALWAYS for bottom player (human player)
+      const bottomPlayerColor = actualPlayerColor; // 'white' or 'black'
+      const bottomPlayerColorCode = bottomPlayerColor === 'white' ? 'w' : 'b';
+      
+      // Check whose turn it is currently
+      const currentTurn = game.turn();
+      
+      console.log(`🎯 ESP Move Analysis (Single Player): Bottom Player: ${bottomPlayerColor} | Current Turn: ${currentTurn === 'w' ? 'white' : 'black'}`);
+      console.log(`📋 Move Logic: ESP move "${move}" is for bottom player (${bottomPlayerColor}). Will apply only if it's ${bottomPlayerColor}'s turn.`);
+      
+      // ESP moves are ALWAYS for the bottom player (human) in single player mode
+      // Only apply the move if it's currently the bottom player's turn
+      if (currentTurn === bottomPlayerColorCode) {
+        console.log(`✅ Applying ESP move for bottom player (${bottomPlayerColor}): ${move}`);
+        
+        // Handle moves in format "e2-e4" by converting to from-to format
+        let from, to;
+        if (move.includes('-')) {
+          [from, to] = move.split('-');
+        } else if (move.match(/^([a-h][1-8])([a-h][1-8])$/)) {
+          from = move.substring(0, 2);
+          to = move.substring(2, 4);
+        } else {
+          console.log('%c❌ INVALID ESP MOVE FORMAT ❌', 'background: #e74c3c; color: white; padding: 5px; border-radius: 5px; font-weight: bold; font-size: 14px');
+          console.log(`🚫 Format error: ${move} - Move should be in format "e2-e4" or "e2e4"`);
+          setPhysicalMoveApplied(false);
+          return;
+        }
+        
+        // Try to make the move using the existing makeMove function
+        const success = makeMove(from, to);
+        
+        if (success) {
+          console.log(`✅ ESP move applied successfully for human player (${bottomPlayerColor})`);
+          setPhysicalMoveApplied(true);
+          // The AI will automatically respond via existing useEffect
+        } else {
+          console.log('%c❌ ESP MOVE FAILED ❌', 'background: #e74c3c; color: white; padding: 5px; border-radius: 5px; font-weight: bold; font-size: 14px');
+          console.log(`🚫 Invalid ESP move: ${move} (${from} to ${to})`);
+          setPhysicalMoveApplied(false);
+        }
+      } else {
+        console.log(`❌ ESP move rejected - not bottom player's turn. Current turn: ${currentTurn === 'w' ? 'white' : 'black'}, Bottom player: ${bottomPlayerColor}`);
+        setPhysicalMoveApplied(false);
+      }
+      
+      // Auto-hide the physical move alert after 5 seconds
+      setTimeout(() => {
+        setLastPhysicalMove(null);
+        setPhysicalMoveApplied(false);
+      }, 5000);
+    };
+    
+    // Setup ESP socket event listeners
+    socket.on('physicalMove', handleESPMove);
+    
+    // Handle new game started event from backend
+    socket.on('newGameStarted', ({ roomId: gameRoomId }) => {
+      if (gameRoomId === roomId) {
+        console.log('🔄 New game started event received from backend');
+        setLastPhysicalMove(null);
+        setPhysicalMoveApplied(false);
+      }
+    });
+    
+    // Set up periodic transfer status logging (every 30 seconds)
+    const transferStatusInterval = setInterval(() => {
+      if (!lastPhysicalMove) {
+        console.log('%c📡 ESP TRANSFER STATUS (Single Player) 📡', 'background: #9b59b6; color: white; padding: 5px; border-radius: 5px; font-weight: bold; font-size: 14px');
+        console.log('ESP transfer move is - not received');
+      }
+    }, 30000); // 30 seconds
+    
+    // Cleanup on unmount
+    return () => {
+      clearInterval(transferStatusInterval);
+      socket.off('physicalMove', handleESPMove);
+      socket.off('newGameStarted');
+    };
+  }, [game, actualPlayerColor, roomId]);
 
   const handleNewGameClick = () => {
     // If it's a new game (no moves made), start directly
@@ -334,8 +467,17 @@ function ChessGame({ difficulty, playerColor, onBackToHome }) {
     setLastMoveFrom(null);
     setLastMoveTo(null);
     setMoveHistory([]);
+    // Clear ESP move alerts when starting a new game
+    setLastPhysicalMove(null);
+    setPhysicalMoveApplied(false);
     updateBoardState(newGame);
     resetAI();
+    
+    // Notify backend that a new game has started to clear ESP move state
+    if (connected) {
+      socket.emit('newGame', roomId);
+      console.log('🔄 Notified backend of new game start (Single Player)');
+    }
     
     // If player is black, AI should make the first move
     if (actualPlayerColor === 'black' && isReady) {
@@ -606,6 +748,9 @@ function ChessGame({ difficulty, playerColor, onBackToHome }) {
             <div className="elo-info">
               <strong>AI Strength:</strong> {eloRating} ELO
             </div>
+            <div className="esp-info">
+              <strong>ESP Status:</strong> {connected ? '🟢 Connected (Human Player)' : '🔴 Disconnected'}
+            </div>
             
             {/* Move History */}
             <div className="moves-list">
@@ -644,6 +789,31 @@ function ChessGame({ difficulty, playerColor, onBackToHome }) {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ESP Move Notification for Single Player */}
+      {lastPhysicalMove && (
+        <div className={`physical-move-notification ${physicalMoveApplied ? 'success' : 'pending'}`}>
+          <div className="notification-content">
+            <div className="notification-icon">
+              {physicalMoveApplied ? '✅' : '⏳'}
+            </div>
+            <div className="notification-text">
+              <div className="notification-title">ESP Move (Human Player)</div>
+              <div className="notification-move">{lastPhysicalMove}</div>
+            </div>
+            <button 
+              className="notification-close" 
+              onClick={() => {
+                setLastPhysicalMove(null);
+                setPhysicalMoveApplied(false);
+              }}
+              title="Close"
+            >
+              ✕
+            </button>
           </div>
         </div>
       )}
