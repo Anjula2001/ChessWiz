@@ -519,12 +519,147 @@ app.post('/physicalMove', (req, res) => {
   }
 });
 
+// Test endpoint to manually store moves for ESP32 (for debugging)
+app.post('/testMove', (req, res) => {
+  const { roomId = 'singleplayer-default', move, fen, playerType, playerColor } = req.body;
+  
+  if (gameRooms.has(roomId)) {
+    const gameRoom = gameRooms.get(roomId);
+    gameRoom.lastMove = move;
+    gameRoom.currentFen = fen || gameRoom.currentFen;
+    
+    // Apply the same filtering logic as Socket.IO handler
+    let storedForESP = false;
+    if (roomId === 'singleplayer-default') {
+      // Single player mode: Only store AI moves
+      if (!playerType || playerType === 'ai' || playerType === 'top') {
+        gameRoom.lastMoveForESP = move;
+        storedForESP = true;
+        console.log(`📡 TEST MOVE STORED (Single Player - AI): ${move} for ESP32`);
+      } else {
+        storedForESP = false;
+        console.log(`🚫 TEST MOVE FILTERED (Single Player - Human): ${move} NOT stored for ESP32`);
+      }
+    } else if (roomId === 'default') {
+      // Multiplayer mode: Apply player type filtering
+      if (playerType === 'bottom') {
+        gameRoom.lastMoveForESP = move;
+        storedForESP = true;
+        console.log(`📡 TEST MOVE STORED (Multiplayer - Bottom Player): ${move} for ESP32 | Player: ${playerColor}`);
+      } else if (playerType === 'top') {
+        storedForESP = false;
+        console.log(`🚫 TEST MOVE FILTERED (Multiplayer - Top Player): ${move} NOT stored for ESP32 | Player: ${playerColor}`);
+      } else {
+        // Legacy behavior - store for ESP32
+        gameRoom.lastMoveForESP = move;
+        storedForESP = true;
+        console.log(`📡 TEST MOVE STORED (Multiplayer - Legacy): ${move} for ESP32 (no playerType specified)`);
+      }
+    }
+    
+    res.json({
+      success: true,
+      message: `Move ${move} ${storedForESP ? 'stored for ESP32' : 'filtered (not sent to ESP32)'} in room ${roomId}`,
+      room: roomId,
+      playerType: playerType || 'not specified',
+      storedForESP: storedForESP,
+      timestamp: new Date().toISOString()
+    });
+  } else {
+    res.status(404).json({
+      success: false,
+      error: `Room ${roomId} not found`,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // Get last physical move endpoint
 app.get('/getPhysicalMove', (req, res) => {
   res.json({
     move: lastPhysicalMove,
     timestamp: new Date().toISOString(),
     available: lastPhysicalMove !== null
+  });
+});
+
+// Get last move for ESP32 polling endpoint
+app.get('/getLastMove', (req, res) => {
+  const { roomId = 'default' } = req.query;
+  console.log(`🔍 ESP32 polling for moves in room: ${roomId}`);
+  
+  if (gameRooms.has(roomId)) {
+    const gameRoom = gameRooms.get(roomId);
+    const move = gameRoom.lastMoveForESP;
+    
+    if (move) {
+      console.log(`📤 ESP32 MOVE FOUND: ${move} in room ${roomId}`);
+      // Clear the move after serving it to ESP32
+      gameRoom.lastMoveForESP = null;
+      
+      res.json({
+        move: move,
+        room: roomId,
+        gameMode: gameRoom.gameMode || 'unknown',
+        timestamp: new Date().toISOString(),
+        success: true
+      });
+    } else {
+      res.json({
+        move: null,
+        room: roomId,
+        gameMode: gameRoom.gameMode || 'unknown',
+        timestamp: new Date().toISOString(),
+        success: false,
+        message: 'No moves available'
+      });
+    }
+  } else {
+    console.log(`❌ ESP32 ERROR: Room ${roomId} does not exist`);
+    res.status(404).json({
+      error: `Room ${roomId} not found`,
+      room: roomId,
+      timestamp: new Date().toISOString(),
+      success: false
+    });
+  }
+});
+
+// Unified ESP32 endpoint - gets moves from ANY game mode
+app.get('/getAnyMove', (req, res) => {
+  console.log(`🔍 ESP32 polling for ANY available moves`);
+  
+  // Check both single player and multiplayer rooms for moves
+  const rooms = ['singleplayer-default', 'default'];
+  
+  for (const roomId of rooms) {
+    if (gameRooms.has(roomId)) {
+      const gameRoom = gameRooms.get(roomId);
+      const move = gameRoom.lastMoveForESP;
+      
+      if (move) {
+        console.log(`📤 ESP32 MOVE FOUND: ${move} from ${roomId}`);
+        // Clear the move after serving it to ESP32
+        gameRoom.lastMoveForESP = null;
+        
+        res.json({
+          move: move,
+          source: roomId,
+          timestamp: new Date().toISOString(),
+          success: true
+        });
+        return; // Found a move, return immediately
+      }
+    }
+  }
+  
+  // No moves found in any room
+  res.json({
+    move: null,
+    source: 'none',
+    timestamp: new Date().toISOString(),
+    success: false,
+    message: 'No moves available in any room'
   });
 });
 
@@ -561,12 +696,38 @@ server.listen(PORT, () => {
   console.log(`♟️  Chess API: http://localhost:${PORT}/getBestMove`);
   console.log(`⚙️  Engine Info: http://localhost:${PORT}/engine-info`);
   console.log(`🎛️  Physical moves: http://localhost:${PORT}/physicalMove`);
+  console.log(`📥 ESP32 move polling: http://localhost:${PORT}/getLastMove?roomId=default`);
+  console.log(`🎯 ESP32 unified polling: http://localhost:${PORT}/getAnyMove`);
+  console.log(`📤 Physical move status: http://localhost:${PORT}/getPhysicalMove`);
   console.log('🎮 ==========================================');
+  
+  // Initialize default rooms for ESP32 compatibility
+  console.log('🏠 Initializing default rooms for ESP32...');
+  gameRooms.set('singleplayer-default', {
+    players: [],
+    currentFen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+    moves: [],
+    lastMove: null,
+    gameMode: 'singleplayer',
+    lastMoveForESP: null
+  });
+  
+  gameRooms.set('default', {
+    players: [],
+    currentFen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+    moves: [],
+    lastMove: null,
+    gameMode: 'multiplayer',
+    lastMoveForESP: null
+  });
+  
+  console.log('✅ Default rooms created: singleplayer-default, default');
   
   // Show initial transfer status
   console.log('\n' + '='.repeat(60));
   console.log('📡 TRANSFER STATUS (SERVER) 📡');
   console.log('transfering move is - not received');
+  console.log('='.repeat(60));
   console.log('='.repeat(60));
 });
 
@@ -617,12 +778,35 @@ io.on('connection', (socket) => {
   });
   
   // Handle player move
-  socket.on('move', ({ roomId, move, fen }) => {
+  socket.on('move', ({ roomId, move, fen, playerType, playerColor }) => {
     if (gameRooms.has(roomId)) {
       const gameRoom = gameRooms.get(roomId);
       gameRoom.lastMove = move;
       gameRoom.currentFen = fen;
       gameRoom.moves.push(move);
+      
+      // Store move for ESP32 based on game mode and player type
+      if (roomId === 'singleplayer-default') {
+        // Single player mode: Only store AI moves (playerType should be 'ai' or undefined for backwards compatibility)
+        if (!playerType || playerType === 'ai' || playerType === 'top') {
+          gameRoom.lastMoveForESP = move;
+          console.log(`📡 ESP32 STORAGE (Single Player - AI): ${move} stored for ESP32`);
+        } else {
+          console.log(`🚫 ESP32 FILTERED (Single Player - Human): ${move} NOT stored for ESP32`);
+        }
+      } else if (roomId === 'default') {
+        // Multiplayer mode: Only store BOTTOM player moves
+        if (playerType === 'bottom') {
+          gameRoom.lastMoveForESP = move;
+          console.log(`📡 ESP32 STORAGE (Multiplayer - Bottom Player): ${move} stored for ESP32 | Player: ${playerColor}`);
+        } else if (playerType === 'top') {
+          console.log(`🚫 ESP32 FILTERED (Multiplayer - Top Player): ${move} NOT stored for ESP32 | Player: ${playerColor}`);
+        } else {
+          // Fallback for moves without playerType (backward compatibility) - assume bottom player
+          gameRoom.lastMoveForESP = move;
+          console.log(`📡 ESP32 STORAGE (Multiplayer - Legacy): ${move} stored for ESP32 (no playerType specified)`);
+        }
+      }
       
       console.log(`♟️ Move in room ${roomId}: ${move}`);
       io.to(roomId).emit('moveMade', { move, fen });

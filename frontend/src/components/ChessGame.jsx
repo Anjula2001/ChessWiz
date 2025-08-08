@@ -275,6 +275,16 @@ function ChessGame({ difficulty, playerColor, onBackToHome }) {
           setGame(newGame);
           updateBoardState();
           
+          // Send AI move to backend for ESP32 to receive
+          socket.emit('move', {
+            roomId,
+            move: `${move.from}-${move.to}`, // Send coordinate format for ESP32
+            fen: newGame.fen(),
+            playerType: 'ai', // Mark as AI move for ESP32 filtering
+            playerColor: 'ai' // AI player identifier
+          });
+          console.log(`📡 AI move sent to ESP: ${move.from}-${move.to}`);
+          
           // Clear the best move to prevent re-application
           setBestMove(null);
           

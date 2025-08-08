@@ -187,10 +187,20 @@ function MultiplayerChess({ playerColor, onBackToHome }) {
         
         // If this is a local move, broadcast it to other players
         if (!isRemoteMove && connected) {
+          // Determine player type based on who made the move
+          // Frontend player (actualPlayerColor) = 'bottom', opponent = 'top'
+          const playerType = moveAttempt.color === (actualPlayerColor === 'white' ? 'w' : 'b') ? 'bottom' : 'top';
+          
+          // Debug logging
+          console.log(`🔍 MOVE DEBUG: moveAttempt.color=${moveAttempt.color}, actualPlayerColor=${actualPlayerColor}, playerType=${playerType}`);
+          console.log(`🔍 LOGIC CHECK: ${moveAttempt.color} === ${actualPlayerColor === 'white' ? 'w' : 'b'} ? 'bottom' : 'top'`);
+          
           socket.emit('move', {
             roomId,
-            move: moveAttempt.san,
-            fen: newGame.fen()
+            move: `${moveAttempt.from}-${moveAttempt.to}`, // Send coordinate format for ESP32
+            fen: newGame.fen(),
+            playerType: playerType, // Dynamic player type based on who made the move
+            playerColor: actualPlayerColor // Include actual player color for identification
           });
         }
         
@@ -268,10 +278,21 @@ function MultiplayerChess({ playerColor, onBackToHome }) {
         // Broadcast the move to other players
         if (connected) {
           console.log(`Broadcasting move to room ${roomId}: ${moveAttempt.san}`);
+          
+          // Determine player type based on who made the move
+          // Frontend player (actualPlayerColor) = 'bottom', opponent = 'top'
+          const playerType = moveAttempt.color === (actualPlayerColor === 'white' ? 'w' : 'b') ? 'bottom' : 'top';
+          
+          // Debug logging
+          console.log(`🔍 DRAG MOVE DEBUG: moveAttempt.color=${moveAttempt.color}, actualPlayerColor=${actualPlayerColor}, playerType=${playerType}`);
+          console.log(`🔍 DRAG LOGIC CHECK: ${moveAttempt.color} === ${actualPlayerColor === 'white' ? 'w' : 'b'} ? 'bottom' : 'top'`);
+          
           socket.emit('move', {
             roomId,
-            move: moveAttempt.san,
-            fen: newGame.fen()
+            move: `${moveAttempt.from}-${moveAttempt.to}`, // Send coordinate format for ESP32
+            fen: newGame.fen(),
+            playerType: playerType, // Dynamic player type based on who made the move
+            playerColor: actualPlayerColor // Include actual player color for identification
           });
         }
       } else {
@@ -588,7 +609,9 @@ function MultiplayerChess({ playerColor, onBackToHome }) {
               socket.emit('move', {
                 roomId,
                 move: moveAttempt.san,
-                fen: newGame.fen()
+                fen: newGame.fen(),
+                playerType: 'top', // Mark as top player move (from ESP32) - do NOT send back to ESP32
+                playerColor: topPlayerColor // Include top player color for identification
               });
             }
           } else {
