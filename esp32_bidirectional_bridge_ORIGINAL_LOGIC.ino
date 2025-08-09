@@ -41,6 +41,7 @@ const char* sendMoveURL = "http://192.168.170.94:3001/physicalMove";
 #define MAGNET_PIN 23
 #define BUTTON_PIN 19  // Push button to enable sensors after motor moves
 #define RESET_BUTTON_PIN 18  // Push button to reset whole game (ESP + Arduino)
+#define ARDUINO_RESET_PIN 5  // GPIO pin to hardware reset Arduino - FIXED: Changed from GPIO4 to avoid MUX1 conflict
 
 // MUX control pins for hall sensors
 #define S0 14
@@ -122,16 +123,16 @@ String lastSentMove = "";
 int moveCount = 0;
 
 // Connection stability
-unsigned long lastWiFiCheck = 0;
-unsigned long wifiCheckInterval = 120000; // Check WiFi every 2 minutes
+// WiFi check timing removed - continuous operation mode
+// WiFi check interval removed - continuous operation without reconnection
 int consecutiveErrors = 0;
 const int maxConsecutiveErrors = 5; 
-bool wifiReconnecting = false; 
+// WiFi reconnection feature removed - continuous operation prioritized
 bool networkStable = true; 
 
-// Arduino communication via default Serial pins (GPIO1/GPIO3)
-#define ARDUINO_SERIAL Serial
-#define DEBUG_SERIAL Serial  
+// Arduino communication via standard UART pins (GPIO1/GPIO3)
+#define ARDUINO_SERIAL Serial   // Use Serial for Arduino communication (GPIO1/3)
+// Note: Debug output will be limited to avoid conflicts
 
 // ==========================================
 // 🔄 FREERTOS DUAL-CORE VARIABLES
@@ -181,6 +182,20 @@ void selectMUXChannel(int channel) {
 void setup() {
   Serial.begin(115200);  
   
+  // Using Serial for Arduino communication (GPIO1/3)
+  delay(2000);  // Wait for Arduino to boot
+  
+  // Test Arduino communication
+  Serial.println("ESP32_TEST");
+  Serial.flush();
+  
+  // Wait for Arduino response
+  delay(1000);
+  if (Serial.available()) {
+    String response = Serial.readStringUntil('\n');
+    // Arduino should respond with "ARDUINO_READY"
+  }
+  
   // Initialize FreeRTOS synchronization objects
   physicalMoveQueue = xQueueCreate(5, sizeof(PhysicalMoveMsg));
   webMoveQueue = xQueueCreate(5, sizeof(WebMoveMsg));
@@ -196,12 +211,11 @@ void setup() {
   
   // Initialize timing variables
   lastSensorRead = millis();
-  lastWiFiCheck = millis();
   lastScanTime = millis();
   lastPrintTime = millis();
   
   Serial.println("🔄 Starting DUAL-CORE FreeRTOS Chess System...");
-  Serial.println("📡 Core 0: WiFi communications & Arduino coordination");
+  Serial.println("📡 Core 0: WiFi communications & Arduino coordination - CONTINUOUS MODE");
   Serial.println("🎯 Core 1: Sensor detection & button handling");
   
   // Create WiFi task on Core 0 (Protocol CPU)
@@ -246,6 +260,8 @@ void setupMultiplexers() {
   pinMode(MAGNET_PIN, OUTPUT);
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   pinMode(RESET_BUTTON_PIN, INPUT_PULLUP);  
+  pinMode(ARDUINO_RESET_PIN, OUTPUT);
+  digitalWrite(ARDUINO_RESET_PIN, HIGH);  // Keep Arduino running (active LOW reset)  
   pinMode(LED_PIN, OUTPUT);
   
   digitalWrite(MAGNET_PIN, LOW);
@@ -280,7 +296,7 @@ void connectToWiFi() {
   Serial.print("Connecting to WiFi");
   
   WiFi.mode(WIFI_STA);
-  WiFi.setAutoReconnect(true);
+  WiFi.setAutoReconnect(false); // Disabled for continuous operation
   WiFi.persistent(true);
   WiFi.setSleep(false); // Disable WiFi sleep
   
@@ -331,32 +347,25 @@ void wifiTask(void *parameter) {
   connectToWiFi();
   
   unsigned long lastPollTime = 0;
-  unsigned long lastWiFiCheck = 0;
   
-  Serial.println("📡 Core 0: WiFi task started");
+  Serial.println("📡 Core 0: WiFi task started - Continuous operation mode");
   
   while (true) {
-    // Handle WiFi connection management
-    if (millis() - lastWiFiCheck >= wifiCheckInterval) {
-      checkWiFiConnectionNonBlocking();
-      lastWiFiCheck = millis();
-    }
-    
-    // Poll for web/AI moves
-    if (WiFi.status() == WL_CONNECTED && !wifiReconnecting && networkStable) {
+    // Poll for web/AI moves only if connected
+    if (WiFi.status() == WL_CONNECTED) {
       if (millis() - lastPollTime >= pollInterval) {
         checkForWebMovesTask();
         lastPollTime = millis();
       }
     }
     
-    // Handle physical moves from Core 1
+    // Handle physical moves from Core 1 - ALWAYS AVAILABLE
     PhysicalMoveMsg physicalMove;
     if (xQueueReceive(physicalMoveQueue, &physicalMove, 0) == pdTRUE) {
       sendPhysicalMoveTask(String(physicalMove.move));
     }
     
-    // Handle Arduino communication
+    // Handle Arduino communication - ALWAYS AVAILABLE
     handleArduinoCommunicationTask();
     
     vTaskDelay(pdMS_TO_TICKS(50)); // 50ms delay
@@ -421,8 +430,8 @@ void sensorTask(void *parameter) {
 // ==========================================
 
 void checkForWebMovesTask() {
-  if (WiFi.status() != WL_CONNECTED || wifiReconnecting || !networkStable) {
-    return;
+  if (WiFi.status() != WL_CONNECTED) {
+    return; // Skip if not connected, but don't block physical moves
   }
   
   HTTPClient http;
@@ -513,12 +522,12 @@ void checkForWebMovesTask() {
 }
 
 void sendPhysicalMoveTask(String move) {
-  if (WiFi.status() != WL_CONNECTED || wifiReconnecting || !networkStable) {
+  if (WiFi.status() != WL_CONNECTED) {
     if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-      Serial.println("⚠️ Network not stable - cannot send move: " + move);
+      Serial.println("⚠️ WiFi not connected - move buffered: " + move);
       xSemaphoreGive(serialMutex);
     }
-    return;
+    return; // Skip sending but don't block, just log
   }
   
   if (move == lastSentMove) {
@@ -656,16 +665,9 @@ void handleArduinoCommunicationTask() {
       if (msg == "MAGNET_ON") {
         digitalWrite(MAGNET_PIN, HIGH);
         ARDUINO_SERIAL.println("MAGNET_READY");
-        if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-          Serial.println("🧲 Core 0: Magnet ON - Arduino request");
-          xSemaphoreGive(serialMutex);
-        }
       } else if (msg == "MAGNET_OFF") {
         digitalWrite(MAGNET_PIN, LOW);
-        if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-          Serial.println("🧲 Core 0: Magnet OFF - Arduino request");
-          xSemaphoreGive(serialMutex);
-        }
+        ARDUINO_SERIAL.println("MAGNET_OFF_READY");
       }
     }
   }
@@ -676,33 +678,14 @@ void handleArduinoCommunicationTask() {
 // ==========================================
 
 void processWebMoveTask(String move, String source) {
-  if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-    Serial.println("************************************************");
-    Serial.println("🌐 WEB/AI MOVE RECEIVED! 🌐");
-    Serial.println("************************************************");
-    Serial.print("🎯 MOVE: ");
-    Serial.println(move);
-    Serial.print("📍 SOURCE: ");
-    Serial.println(source);
-    
-    // ORIGINAL LOGIC: Automatically disable sensors when web move received
-    Serial.println("🚫 SENSOR DETECTION DISABLED (Web move received)");
-    Serial.println("🤖 Arduino will move piece");
-    Serial.println("🔘 Press BUTTON on GPIO19 to re-enable sensors after Arduino completes");
-    Serial.println("************************************************");
-    xSemaphoreGive(serialMutex);
-  }
-  
-  // ORIGINAL LOGIC: Disable sensors immediately when web move received
+  // ORIGINAL LOGIC: Automatically disable sensors when web move received
   sensorsDisabled = true;
   
-  // Send move to Arduino
+  // Send move to Arduino immediately (minimal debug to avoid conflicts)
   if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-    Serial.print("📤 Sending to Arduino: ");
-    Serial.println(move);
+    // Send move to Arduino via Serial (GPIO1/3)
     ARDUINO_SERIAL.println(move);
     ARDUINO_SERIAL.flush();
-    Serial.println("✅ Move sent to Arduino via Core 1");
     xSemaphoreGive(serialMutex);
   }
 }
@@ -726,6 +709,7 @@ void processArduinoMessageTask(String msg) {
     } else if (msg == "MAGNET_OFF") {
       digitalWrite(MAGNET_PIN, LOW);
       Serial.println("🧲 Magnet OFF - Arduino request");
+      ARDUINO_SERIAL.println("MAGNET_OFF_READY");
     } else {
       Serial.println("ℹ️ Arduino: " + msg);
     }
@@ -889,23 +873,84 @@ void checkResetButtonTask() {
     if (currentTime - lastResetButtonPress > RESET_BUTTON_DEBOUNCE) {
       lastResetButtonPress = currentTime;
       
-      if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-        Serial.println("🔄 RESET BUTTON PRESSED!");
-        Serial.println("🤖 Sending RESET command to Arduino...");
-        Serial.println("🔄 ESP32 will restart in 5 seconds...");
+      if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        Serial.println("🔄 RESET BUTTON PRESSED - Resetting Arduino via Serial...");
         xSemaphoreGive(serialMutex);
       }
       
+      // Disable magnet and LED immediately
       digitalWrite(MAGNET_PIN, LOW);
       digitalWrite(LED_PIN, LOW);
       
-      for (int i = 0; i < 5; i++) {
+      // Enhanced Serial Reset Protocol - Multiple attempts for reliability
+      for (int attempt = 1; attempt <= 3; attempt++) {
+        if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+          Serial.printf("📤 Reset attempt %d/3: Sending RESET_ARDUINO via RX/TX\n", attempt);
+          xSemaphoreGive(serialMutex);
+        }
+        
+        // Send software reset command via default Serial (GPIO1/GPIO3)
         ARDUINO_SERIAL.println("RESET_ARDUINO");
         ARDUINO_SERIAL.flush();
         delay(300);
+        
+        // Send alternative reset commands
+        ARDUINO_SERIAL.println("SYSTEM_RESET");
+        ARDUINO_SERIAL.flush();
+        delay(200);
+        
+        ARDUINO_SERIAL.println("RESTART");
+        ARDUINO_SERIAL.flush();
+        delay(200);
+      }
+      
+      if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        Serial.println("📤 Serial reset commands sent successfully");
+        Serial.println("⏳ Waiting for Arduino to restart...");
+        xSemaphoreGive(serialMutex);
+      }
+      
+      // Wait for Arduino to process reset and restart
+      delay(2000);
+      
+      // Test communication after reset
+      ARDUINO_SERIAL.println("ESP32_TEST");
+      ARDUINO_SERIAL.flush();
+      delay(500);
+      
+      // Check if Arduino responds
+      if (ARDUINO_SERIAL.available()) {
+        String response = ARDUINO_SERIAL.readStringUntil('\n');
+        if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+          Serial.println("✅ Arduino responded: " + response);
+          xSemaphoreGive(serialMutex);
+        }
+      } else {
+        if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+          Serial.println("⚠️ Arduino did not respond - may still be restarting");
+          xSemaphoreGive(serialMutex);
+        }
+      }
+      
+      // Optional: Hardware reset as backup (if GPIO5 is connected)
+      if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        Serial.println("🔧 Backup: Hardware reset pulse on GPIO5");
+        xSemaphoreGive(serialMutex);
+      }
+      
+      digitalWrite(ARDUINO_RESET_PIN, LOW);   // Pull reset LOW
+      delay(100);
+      digitalWrite(ARDUINO_RESET_PIN, HIGH);  // Release reset
+      delay(500);
+      
+      if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        Serial.println("🔄 ESP32 will restart in 2 seconds...");
+        xSemaphoreGive(serialMutex);
       }
       
       delay(2000);
+      
+      // Reset ESP32
       ESP.restart();
     }
   }
@@ -913,30 +958,7 @@ void checkResetButtonTask() {
   lastResetButtonState = currentResetButtonState;
 }
 
-void checkWiFiConnectionNonBlocking() {
-  if (millis() - lastWiFiCheck >= wifiCheckInterval) {
-    lastWiFiCheck = millis();
-    
-    if (WiFi.status() != WL_CONNECTED && !wifiReconnecting) {
-      Serial.println("❌ WiFi disconnected! Attempting reconnection...");
-      wifiReconnecting = true;
-      networkStable = false;
-      
-      WiFi.begin(ssid, password);
-      consecutiveErrors = 0;
-    }
-  }
-  
-  if (wifiReconnecting) {
-    if (WiFi.status() == WL_CONNECTED) {
-      Serial.println("✅ WiFi Reconnected!");
-      consecutiveErrors = 0;
-      wifiReconnecting = false;
-      networkStable = true;
-      delay(100);
-    }
-  }
-}
+// WiFi reconnection system removed for continuous operation
 
 void initializeSensors() {
   for (byte row = 0; row < 8; row++) {

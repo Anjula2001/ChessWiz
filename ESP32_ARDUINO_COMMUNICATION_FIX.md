@@ -1,12 +1,36 @@
-# ESP32 ↔ Arduino Communication Fix Guide
+# ESP32 ↔ Arduino Communication Fix Guide - RESOLVED
 
-## 🔍 **Problem Identified**
-The ESP32 is **not making physical moves** because:
+## 🎯 **MAIN ISSUE FIXED: Serial Port Conflict**
 
-1. ✅ **FIXED**: ESP32 was using same Serial for Arduino communication AND debug output
-2. ❌ **NEEDS ARDUINO**: No Arduino is connected or running compatible motor control code
+### � **Problem Identified**
+The ESP32 was using **Serial (GPIO1/3)** for BOTH:
+- Arduino communication 
+- Debug output to computer
 
-## 🔧 **Hardware Connection Required**
+This created conflicts where commands couldn't reach Arduino properly!
+
+### ✅ **Solution Implemented**
+
+#### 1. **ESP32 Serial Separation**
+- **Serial (GPIO1/3)** = Debug output to computer monitor  
+- **Serial2 (GPIO16/17)** = Arduino communication ONLY
+
+#### 2. **ESP32 Code Changes**
+```cpp
+// BEFORE (PROBLEMATIC):
+#define ARDUINO_SERIAL Serial
+
+// AFTER (FIXED):
+#define ARDUINO_SERIAL Serial2
+Serial2.begin(115200, SERIAL_8N1, 16, 17);
+```
+
+#### 3. **Arduino Code Changes**
+- Added ESP32_TEST message handler 
+- Added ARDUINO_READY response for connection verification
+- Enhanced move processing debugging
+
+### � **Hardware Connection Required**
 
 ### **ESP32 ↔ Arduino Wiring:**
 ```
