@@ -36,12 +36,16 @@
 // === Stepper motor and board settings
 const int step_delay = 450; // OPTIMIZED: Reduced from 550 to 450 microseconds for faster motor movement
 const long steps_per_cm = 419;
-const float square_size_cm = 5.34; // ORIGINAL WORKING: Single square size value
-const long steps_per_square = steps_per_cm * square_size_cm; // ORIGINAL WORKING: Simple calculation
+const float initial_square_size_cm = 4.7;    // Square size before reaching (0,0) - for offset
+const float final_square_size_cm = 5.34;     // Square size after reaching (0,0) - for moves
+float current_square_size_cm = initial_square_size_cm;
+long current_steps_per_square = steps_per_cm * initial_square_size_cm;
+long steps_per_square = current_steps_per_square; // For compatibility with existing functions
 
 // === Current position (chess grid coordinate)
 int currentX = -2;
 int currentY = 0;
+bool hasReachedOrigin = false;
 
 // === INTELLIGENT PIECE DETECTION SYSTEM ===
 // Optimized: Use bit array instead of bool array to save memory
@@ -89,6 +93,8 @@ void setup() {
   moveOnlyX(2);
   currentX = 0;
   currentY = 0;
+  
+  updateSquareSize(); // Update to final square size after reaching origin
   
   // ENHANCED DEBUGGING: Confirm initial position
   Serial.print(F("🎯 INITIAL POSITION SET: ("));
@@ -448,8 +454,13 @@ void checkForCaptureMove(String from, String to) {
 
 // CRITICAL: Add missing updateSquareSize function from working version
 void updateSquareSize() {
-  // REMOVED: Dynamic square size feature - using simple constant like working version
-  // This was causing motor calculation issues in the optimized version
+  if (!hasReachedOrigin) {
+    hasReachedOrigin = true;
+    current_square_size_cm = final_square_size_cm;
+    current_steps_per_square = steps_per_cm * final_square_size_cm;
+    steps_per_square = current_steps_per_square; // Update compatibility variable
+    Serial.println(F("✅ Updated to final square size: 5.34cm"));
+  }
 }
 
 void executeCaptureRemoval(int captureX, int captureY) {
@@ -870,7 +881,7 @@ void moveDiagonal(int deltaX, int deltaY) {
   Serial.print(", deltaY=");
   Serial.print(deltaY);
   Serial.print(", square size=");
-  Serial.print(square_size_cm);
+  Serial.print(current_square_size_cm);
   Serial.println(" cm");
 
   for (long i = 0; i < totalSteps; i++) {
