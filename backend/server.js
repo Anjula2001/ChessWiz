@@ -460,16 +460,25 @@ app.post('/physicalMove', (req, res) => {
     // Convert from "e2-e4" format to "e2e4" format if needed
     const normalizedMove = move.replace('-', '');
     
-    // Broadcast the move to all clients in the multiplayer room
+    // FIXED: Broadcast to BOTH single player and multiplayer rooms
+    // This ensures physical moves work in both game modes
+    const targetRooms = ['singleplayer-default', 'default'];
+    
+    console.log(`♟️ Physical move: ${normalizedMove} for ${playerSide} player`);
+    console.log(`📡 TRANSFER STATUS: transfering move is - ${move} (broadcasting to both rooms)`);
+    
+    // Update game room data for the specified room
     if (gameRooms.has(roomId)) {
       const gameRoom = gameRooms.get(roomId);
       gameRoom.lastMove = normalizedMove;
       gameRoom.moves.push(normalizedMove);
+    }
+    
+    // Broadcast to both single player and multiplayer rooms
+    targetRooms.forEach(room => {
+      console.log(`� Sending physical move to room: ${room}`);
       
-      console.log(`♟️ Physical move in room ${roomId}: ${normalizedMove} for ${playerSide} player`);
-      console.log(`📡 TRANSFER STATUS: transfering move is - ${move} (broadcasting to room ${roomId})`);
-      
-      io.to(roomId).emit('physicalMove', { 
+      io.to(room).emit('physicalMove', { 
         move: normalizedMove, 
         source: 'esp',
         playerSide: playerSide,
@@ -477,27 +486,16 @@ app.post('/physicalMove', (req, res) => {
       });
       
       // Also broadcast as a regular move for compatibility
-      io.to(roomId).emit('moveMade', { 
+      io.to(room).emit('moveMade', { 
         move: normalizedMove, 
         fromESP: true,
         playerSide: playerSide
       });
-      
-      console.log(`✅ TRANSFER SUCCESS: transfering move is - ${move} (successfully broadcast)`);
-    } else {
-      console.log(`⚠️ Room ${roomId} not found, broadcasting to all rooms`);
-      console.log(`📡 TRANSFER STATUS: transfering move is - ${move} (broadcasting to all clients)`);
-      
-      // If no specific room, broadcast to all clients
-      io.emit('physicalMove', { 
-        move: normalizedMove, 
-        source: 'esp',
-        playerSide: playerSide,
-        timestamp: new Date().toISOString()
-      });
-      
-      console.log(`✅ TRANSFER SUCCESS: transfering move is - ${move} (broadcast to all clients)`);
-    }
+    });
+    
+    console.log(`✅ TRANSFER SUCCESS: transfering move is - ${move} (broadcast to all game modes)`);
+    console.log(`🎯 Single Player room: singleplayer-default`);
+    console.log(`🎯 Multiplayer room: default`);
     
     // Return success response
     res.status(200).json({
@@ -594,16 +592,30 @@ app.get('/getLastMove', (req, res) => {
     
     if (move) {
       console.log(`📤 ESP32 MOVE FOUND: ${move} in room ${roomId}`);
-      // Clear the move after serving it to ESP32
-      gameRoom.lastMoveForESP = null;
       
-      res.json({
-        move: move,
-        room: roomId,
-        gameMode: gameRoom.gameMode || 'unknown',
-        timestamp: new Date().toISOString(),
-        success: true
-      });
+      // Check if move has expired (30 seconds for better ESP32 polling reliability)
+      if (gameRoom.lastMoveTimestamp && Date.now() - gameRoom.lastMoveTimestamp > 30000) {
+        gameRoom.lastMoveForESP = null;
+        gameRoom.lastMoveTimestamp = null;
+        console.log(`🕐 ESP32 MOVE EXPIRED: ${move} cleared from room ${roomId}`);
+        
+        res.json({
+          move: null,
+          room: roomId,
+          gameMode: gameRoom.gameMode || 'unknown',
+          timestamp: new Date().toISOString(),
+          success: false,
+          message: 'Move expired'
+        });
+      } else {
+        res.json({
+          move: move,
+          room: roomId,
+          gameMode: gameRoom.gameMode || 'unknown',
+          timestamp: new Date().toISOString(),
+          success: true
+        });
+      }
     } else {
       res.json({
         move: null,
@@ -639,16 +651,27 @@ app.get('/getAnyMove', (req, res) => {
       
       if (move) {
         console.log(`📤 ESP32 MOVE FOUND: ${move} from ${roomId}`);
-        // Clear the move after serving it to ESP32
-        gameRoom.lastMoveForESP = null;
         
-        res.json({
-          move: move,
-          source: roomId,
-          timestamp: new Date().toISOString(),
-          success: true
-        });
-        return; // Found a move, return immediately
+        // Add timestamp for move retention (keep for 10 seconds)
+        if (!gameRoom.lastMoveTimestamp) {
+          gameRoom.lastMoveTimestamp = Date.now();
+        }
+        
+        // Clear move after 10 seconds to prevent it being served repeatedly
+        if (Date.now() - gameRoom.lastMoveTimestamp > 10000) {
+          gameRoom.lastMoveForESP = null;
+          gameRoom.lastMoveTimestamp = null;
+          console.log(`🕐 ESP32 MOVE EXPIRED: ${move} cleared from room ${roomId}`);
+          continue; // Try next room
+        } else {
+          res.json({
+            move: move,
+            source: roomId,
+            timestamp: new Date().toISOString(),
+            success: true
+          });
+          return; // Found a move, return immediately
+        }
       }
     }
   }
@@ -779,6 +802,8 @@ io.on('connection', (socket) => {
   
   // Handle player move
   socket.on('move', ({ roomId, move, fen, playerType, playerColor }) => {
+    console.log(`🎯 MOVE RECEIVED: roomId=${roomId}, move=${move}, playerType=${playerType}, playerColor=${playerColor}`);
+    
     if (gameRooms.has(roomId)) {
       const gameRoom = gameRooms.get(roomId);
       gameRoom.lastMove = move;
@@ -787,23 +812,28 @@ io.on('connection', (socket) => {
       
       // Store move for ESP32 based on game mode and player type
       if (roomId === 'singleplayer-default') {
-        // Single player mode: Only store AI moves (playerType should be 'ai' or undefined for backwards compatibility)
-        if (!playerType || playerType === 'ai' || playerType === 'top') {
-          gameRoom.lastMoveForESP = move;
-          console.log(`📡 ESP32 STORAGE (Single Player - AI): ${move} stored for ESP32`);
+        // Single player mode: Only store AI moves 
+        if (playerType === 'ai') {
+          // Convert move format if needed (g8f6 -> g8-f6 for ESP32)
+          const formattedMove = move.includes('-') ? move : `${move.substring(0,2)}-${move.substring(2,4)}`;
+          gameRoom.lastMoveForESP = formattedMove;
+          gameRoom.lastMoveTimestamp = Date.now(); // Set timestamp when move is stored
+          console.log(`📡 ESP32 STORAGE (Single Player - AI): ${formattedMove} stored for ESP32 (original: ${move})`);
         } else {
-          console.log(`🚫 ESP32 FILTERED (Single Player - Human): ${move} NOT stored for ESP32`);
+          console.log(`🚫 ESP32 FILTERED (Single Player - Human): ${move} NOT stored for ESP32 (playerType: ${playerType})`);
         }
       } else if (roomId === 'default') {
         // Multiplayer mode: Only store BOTTOM player moves
         if (playerType === 'bottom') {
           gameRoom.lastMoveForESP = move;
+          gameRoom.lastMoveTimestamp = Date.now(); // Set timestamp when move is stored
           console.log(`📡 ESP32 STORAGE (Multiplayer - Bottom Player): ${move} stored for ESP32 | Player: ${playerColor}`);
         } else if (playerType === 'top') {
           console.log(`🚫 ESP32 FILTERED (Multiplayer - Top Player): ${move} NOT stored for ESP32 | Player: ${playerColor}`);
         } else {
           // Fallback for moves without playerType (backward compatibility) - assume bottom player
           gameRoom.lastMoveForESP = move;
+          gameRoom.lastMoveTimestamp = Date.now(); // Set timestamp when move is stored
           console.log(`📡 ESP32 STORAGE (Multiplayer - Legacy): ${move} stored for ESP32 (no playerType specified)`);
         }
       }

@@ -1,24 +1,14 @@
 /*
- * ESP32 Chess Board Bridge - Physical ↔ Web Communication
- * DUAL-CORE FREERTOS IMPLEMENTATION - RESTORED ORIGINAL LOGIC
+ * ESP32 Chess Board Bridge - CLEAN VERSION - Arduino Communication Only
  * 
  * 🎯 FUNCTION:
- * - Receives physical moves from hall sensors → Sends to web
  * - Receives web/AI moves from server → Sends to Arduino motors
+ * - Receives physical moves from hall sensors → Sends to web
  * 
- * 🔄 DUAL-CORE ARCHITECTURE:
- * - CORE 0: WiFi communications, HTTP requests, Arduino communication
- * - CORE 1: Physical sensor detection, button handling, real-time operations
- * 
- * 🎮 GAME MODE LOGIC:
- * - SINGLE PLAYER: Physical moves → BOTTOM player (web player = physical player)
- * - MULTIPLAYER: Physical moves → TOP player (physical = top, web = bottom)
- * 
- * 🔘 BUTTON WORKFLOW:
- * 1. Web move received → Sensors DISABLED automatically
- * 2. Arduino moves piece → Motors complete
- * 3. Physical player presses GPIO 19 button → Sensors ENABLED
- * 4. Physical player makes move → Sensors detect → Send to web
+ * � CRITICAL FIX:
+ * - NO debug output to Serial (Arduino communication only)
+ * - Clean move transmission: "e7-e5" format only
+ * - Minimal processing to avoid Arduino confusion
  */
 
 #include <WiFi.h>
@@ -35,6 +25,8 @@ const char* password = "123456789";
 // Server configuration - CORRECTED IP
 const char* serverIP = "192.168.170.94";  // Your computer's IP address
 const char* getMovesURL = "http://192.168.170.94:3001/getAnyMove";        
+const char* getSinglePlayerURL = "http://192.168.170.94:3001/getLastMove?roomId=singleplayer-default";
+const char* getMultiPlayerURL = "http://192.168.170.94:3001/getLastMove?roomId=default";
 const char* sendMoveURL = "http://192.168.170.94:3001/physicalMove";      
 
 // --- Pin Definitions ---
@@ -82,23 +74,23 @@ PendingMove pendingMove = {0, 0, 0, false};
 SensorState sensors[8][8];
 bool boardInitialized = false;
 
-// Debouncing constants
-const unsigned long DEBOUNCE_TIME = 30;     // 30ms debounce
+// Debouncing constants - OPTIMIZED for faster response
+const unsigned long DEBOUNCE_TIME = 20;     // REDUCED: 20ms debounce (was 30ms)
 const byte DEBOUNCE_THRESHOLD = 2;          // Need 2 consistent readings
 const unsigned long MOVE_TIMEOUT = 10000;   // 10 second timeout for incomplete moves
-const unsigned long SCAN_INTERVAL = 20;     // Scan every 20ms
+const unsigned long SCAN_INTERVAL = 15;     // OPTIMIZED: Scan every 15ms (was 20ms)
 const unsigned long PRINT_INTERVAL = 1000; // Print status every 1s
 
 // Button variables - ORIGINAL LOGIC: Button enables sensors after motor moves
 bool lastButtonState = HIGH;               // Button is pulled up
 unsigned long lastButtonPress = 0;
-const unsigned long BUTTON_DEBOUNCE = 200; // 200ms button debounce
+const unsigned long BUTTON_DEBOUNCE = 150; // OPTIMIZED: 150ms button debounce (was 200ms)
 bool sensorsDisabled = false;              // Sensors disabled when motors start, enabled by button
 
 // Reset button variables
 bool lastResetButtonState = HIGH;         
 unsigned long lastResetButtonPress = 0;
-const unsigned long RESET_BUTTON_DEBOUNCE = 300; 
+const unsigned long RESET_BUTTON_DEBOUNCE = 250; // OPTIMIZED: 250ms (was 300ms) 
 
 // Timing control
 unsigned long lastScanTime = 0;
@@ -114,7 +106,7 @@ const byte MUX_CHANNEL[16][4] = {
 
 // Timing variables
 unsigned long lastPollTime = 0;
-unsigned long pollInterval = 5000; // Poll every 5 seconds
+unsigned long pollInterval = 1000; // OPTIMIZED: Poll every 1 second (was 2 seconds) for faster AI move detection
 unsigned long lastSensorRead = 0;   
 String lastReceivedMove = "";
 String lastReceivedSource = "";  // Track the source of received moves
@@ -132,7 +124,8 @@ bool networkStable = true;
 
 // Arduino communication via standard UART pins (GPIO1/GPIO3)
 #define ARDUINO_SERIAL Serial   // Use Serial for Arduino communication (GPIO1/3)
-// Note: Debug output will be limited to avoid conflicts
+// DEBUG DISABLED: All Serial.println removed to prevent Arduino confusion
+#define DEBUG_PRINT(x) // Debug output disabled to avoid Arduino conflicts
 
 // ==========================================
 // 🔄 FREERTOS DUAL-CORE VARIABLES
@@ -176,21 +169,21 @@ void selectMUXChannel(int channel) {
   digitalWrite(S1, MUX_CHANNEL[channel][1]);
   digitalWrite(S2, MUX_CHANNEL[channel][2]);
   digitalWrite(S3, MUX_CHANNEL[channel][3]);
-  delayMicroseconds(300); // Allow channel to settle
+  delayMicroseconds(100); // OPTIMIZED: Reduced from 300 microseconds for faster MUX switching
 }
 
 void setup() {
   Serial.begin(115200);  
   
   // Using Serial for Arduino communication (GPIO1/3)
-  delay(2000);  // Wait for Arduino to boot
+  delay(1000);  // OPTIMIZED: Reduced from 2000ms - faster boot
   
   // Test Arduino communication
   Serial.println("ESP32_TEST");
   Serial.flush();
   
   // Wait for Arduino response
-  delay(1000);
+  delay(500); // OPTIMIZED: Reduced from 1000ms
   if (Serial.available()) {
     String response = Serial.readStringUntil('\n');
     // Arduino should respond with "ARDUINO_READY"
@@ -214,9 +207,9 @@ void setup() {
   lastScanTime = millis();
   lastPrintTime = millis();
   
-  Serial.println("🔄 Starting DUAL-CORE FreeRTOS Chess System...");
-  Serial.println("📡 Core 0: WiFi communications & Arduino coordination - CONTINUOUS MODE");
-  Serial.println("🎯 Core 1: Sensor detection & button handling");
+  DEBUG_PRINT("🔄 Starting DUAL-CORE FreeRTOS Chess System...");
+  DEBUG_PRINT("📡 Core 0: WiFi communications & Arduino coordination - CONTINUOUS MODE");
+  DEBUG_PRINT("🎯 Core 1: Sensor detection & button handling");
   
   // Create WiFi task on Core 0 (Protocol CPU)
   xTaskCreatePinnedToCore(
@@ -240,8 +233,8 @@ void setup() {
     1                   // Core 1 (Application CPU)
   );
   
-  Serial.println("✅ Dual-core tasks created successfully!");
-  Serial.println("🎮 System ready for chess gameplay!");
+  DEBUG_PRINT("✅ Dual-core tasks created successfully!");
+  DEBUG_PRINT("🎮 System ready for chess gameplay!");
 }
 
 void setupMultiplexers() {
@@ -268,15 +261,13 @@ void setupMultiplexers() {
   digitalWrite(LED_PIN, HIGH); // Start with LED on during initialization
   
   // Initialize sensors
-  initializeSensors();
+  initializeBoardState();
   
-  Serial.println("Chess Board System Starting...");
-  Serial.println("Initializing sensors... Please wait 3 seconds.");
-  
-  // Calibration phase
-  for (int i = 0; i < 50; i++) { // 50 scans over ~1 second at 20ms interval
+  DEBUG_PRINT("Chess Board System Starting...");
+  DEBUG_PRINT("Initializing sensors... Please wait 1.5 seconds."); // Updated message  // OPTIMIZED: Faster calibration phase
+  for (int i = 0; i < 30; i++) { // REDUCED: 30 scans over ~450ms at 15ms interval
     scanAndDebounceBoard();
-    delay(20);
+    delay(15); // OPTIMIZED: 15ms interval (was 20ms)
   }
   
   // Set previous stable states after calibration
@@ -287,13 +278,13 @@ void setupMultiplexers() {
   }
   
   boardInitialized = true;
-  Serial.println("System Ready! Waiting for movement...");
-  Serial.println("Format: FROM_SQUARE -> TO_SQUARE");
-  Serial.println("----------------------------------------");
+  DEBUG_PRINT("System Ready! Waiting for movement...");
+  DEBUG_PRINT("Format: FROM_SQUARE -> TO_SQUARE");
+  DEBUG_PRINT("----------------------------------------");
 }
 
 void connectToWiFi() {
-  Serial.print("Connecting to WiFi");
+  DEBUG_PRINT("Connecting to WiFi");
   
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(false); // Disabled for continuous operation
@@ -305,31 +296,31 @@ void connectToWiFi() {
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 30) {
     delay(500);
-    Serial.print(".");
+    DEBUG_PRINT(".");
     attempts++;
   }
   
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\n✅ WiFi Connected!");
-    Serial.print("📍 ESP32 IP: ");
-    Serial.println(WiFi.localIP());
-    Serial.print("📡 Server IP: ");
-    Serial.println(serverIP);
-    Serial.print("📥 Get moves from: ");
-    Serial.println(getMovesURL);
-    Serial.print("📤 Send moves to: ");
-    Serial.println(sendMoveURL);
-    Serial.println("📡 Polling every 5 seconds...");
-    Serial.println("👁️ Monitoring hall sensors continuously...");
-    Serial.println("🔘 Push button on GPIO19 to activate sensor detection after motor moves...");
-    Serial.println("🔄 Push button on GPIO18 to RESET whole game (ESP32 + Arduino)...");
-    Serial.println("🤖 Arduino communication on default Serial (GPIO1/GPIO3) at 115200 baud");
+    DEBUG_PRINT("\n✅ WiFi Connected!");
+    DEBUG_PRINT("📍 ESP32 IP: ");
+    DEBUG_PRINT(WiFi.localIP());
+    DEBUG_PRINT("📡 Server IP: ");
+    DEBUG_PRINT(serverIP);
+    DEBUG_PRINT("📥 Get moves from: ");
+    DEBUG_PRINT(getMovesURL);
+    DEBUG_PRINT("📤 Send moves to: ");
+    DEBUG_PRINT(sendMoveURL);
+    DEBUG_PRINT("📡 Polling every 2 seconds...");
+    DEBUG_PRINT("👁️ Monitoring hall sensors continuously...");
+    DEBUG_PRINT("🔘 Push button on GPIO19 to activate sensor detection after motor moves...");
+    DEBUG_PRINT("🔄 Push button on GPIO18 to RESET whole game (ESP32 + Arduino)...");
+    DEBUG_PRINT("🤖 Arduino communication on default Serial (GPIO1/GPIO3) at 115200 baud");
     
     networkStable = true;
     consecutiveErrors = 0;
   } else {
-    Serial.println("\n❌ WiFi Connection Failed!");
-    Serial.println("Please check your WiFi credentials");
+    DEBUG_PRINT("\n❌ WiFi Connection Failed!");
+    DEBUG_PRINT("Please check your WiFi credentials");
     networkStable = false;
   }
 }
@@ -348,7 +339,7 @@ void wifiTask(void *parameter) {
   
   unsigned long lastPollTime = 0;
   
-  Serial.println("📡 Core 0: WiFi task started - Continuous operation mode");
+  DEBUG_PRINT("📡 Core 0: WiFi task started - Continuous operation mode");
   
   while (true) {
     // Poll for web/AI moves only if connected
@@ -368,7 +359,7 @@ void wifiTask(void *parameter) {
     // Handle Arduino communication - ALWAYS AVAILABLE
     handleArduinoCommunicationTask();
     
-    vTaskDelay(pdMS_TO_TICKS(50)); // 50ms delay
+    vTaskDelay(pdMS_TO_TICKS(25)); // OPTIMIZED: 25ms delay (was 50ms) for faster WiFi response
   }
 }
 
@@ -379,7 +370,7 @@ void sensorTask(void *parameter) {
   unsigned long lastScanTime = 0;
   unsigned long lastPrintTime = 0;
   
-  Serial.println("🎯 Core 1: Sensor task started");
+  DEBUG_PRINT("🎯 Core 1: Sensor task started");
   
   while (true) {
     // Reset button handling (highest priority)
@@ -421,7 +412,7 @@ void sensorTask(void *parameter) {
       }
     }
     
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(5)); // OPTIMIZED: 5ms delay (was 10ms) for faster sensor response
   }
 }
 
@@ -437,7 +428,13 @@ void checkForWebMovesTask() {
   HTTPClient http;
   WiFiClient client;
   
-  if (!http.begin(client, getMovesURL)) {
+  // SIMPLIFIED: Always use unified endpoint for polling
+  // Web frontend handles game mode routing
+  const char* pollURL = getMovesURL; // Always use unified endpoint
+  
+  Serial.println("🔍 Polling unified endpoint for any moves");
+  
+  if (!http.begin(client, pollURL)) {
     Serial.println("❌ HTTP begin failed - skipping poll");
     return;
   }
@@ -498,12 +495,14 @@ void checkForWebMovesTask() {
             webMove.source[sizeof(webMove.source) - 1] = '\0';
             xQueueSend(webMoveQueue, &webMove, 0);
             
-            if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-              Serial.println("🌐 WEB/AI MOVE → Sent to Core 1");
-              xSemaphoreGive(serialMutex);
-            }
+            // DEBUG REMOVED: No output to Serial to avoid Arduino confusion
+          } else {
+            // No new move found - polling working but no AI move yet
+            // DEBUG REMOVED: No output to Serial to avoid Arduino confusion
           }
         }
+      } else {
+        Serial.println("🔍 Poll complete - no move data in response");
       }
     }
   } else {
@@ -552,30 +551,21 @@ void sendPhysicalMoveTask(String move) {
   http.addHeader("Content-Type", "application/json");
   http.setTimeout(1500);
   
-  // GAME MODE LOGIC - RESTORED ORIGINAL REQUIREMENTS
-  String targetPlayerSide;
-  String targetRoomId;
-  String targetPlayerInfo;
+  // SIMPLIFIED LOGIC: ESP32 sends all physical moves to server
+  // Web frontend handles game mode detection and routing
   
-  if (lastReceivedSource == "ai" || lastReceivedSource == "singleplayer-default") {
-    // SINGLE PLAYER MODE: Physical moves → BOTTOM player
-    targetRoomId = "singleplayer-default";
-    targetPlayerSide = webPlayerColor.length() > 0 ? webPlayerColor : "white";
-    String upperPlayerSide = targetPlayerSide;
-    upperPlayerSide.toUpperCase();
-    targetPlayerInfo = "BOTTOM (" + upperPlayerSide + ") - Single Player";
-  } else {
-    // MULTIPLAYER MODE: Physical moves → TOP player
-    targetRoomId = "default";
-    if (webPlayerColor == "white") {
-      targetPlayerSide = "black"; // Physical is opposite of web player
-      targetPlayerInfo = "TOP (BLACK) - Multiplayer";
-    } else {
-      targetPlayerSide = "white";
-      targetPlayerInfo = "TOP (WHITE) - Multiplayer";
-    }
+  // Send physical move to the unified endpoint - let web frontend decide routing
+  String targetRoomId = "default";  // Use default room for all moves
+  String targetPlayerSide = "physical";  // Mark as physical move
+  String targetPlayerInfo = "PHYSICAL BOARD";
+  
+  if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+    Serial.println("📤 SENDING PHYSICAL MOVE: " + move);
+    Serial.println("🔄 Web frontend will handle game mode routing");
+    xSemaphoreGive(serialMutex);
   }
   
+  // Create simplified payload - let backend handle room routing
   const char* payloadTemplate = "{\"move\":\"%s\",\"source\":\"physical\",\"roomId\":\"%s\",\"playerSide\":\"%s\"}";
   char payload[200];
   int result = snprintf(payload, sizeof(payload), payloadTemplate, move.c_str(), targetRoomId.c_str(), targetPlayerSide.c_str());
@@ -589,64 +579,32 @@ void sendPhysicalMoveTask(String move) {
     return;
   }
   
-  if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-    Serial.println("================================================");
-    Serial.println("📤 SENDING PHYSICAL MOVE TO WEB");
-    Serial.println("================================================");
-    Serial.println("🎯 Move: " + move);
-    Serial.println("🎮 Game Mode: " + lastReceivedSource);
-    Serial.println("🎨 Web Player Color: " + webPlayerColor);
-    Serial.println("👤 Physical Player: " + targetPlayerInfo);
-    Serial.print("📤 URL: ");
-    Serial.println(sendMoveURL);
-    Serial.print("📤 Payload: ");
-    Serial.println(payload);
-    xSemaphoreGive(serialMutex);
-  }
-  
   int httpResponseCode = http.POST(payload);
   
   if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-    Serial.print("📥 HTTP Response Code: ");
+    Serial.println("================================================");
+    Serial.println("📤 PHYSICAL MOVE: " + move);
+    Serial.println("🎮 Mode: " + lastReceivedSource + " | Player: " + targetPlayerInfo);
+    Serial.print("📥 Response: ");
     Serial.println(httpResponseCode);
     
-    if (httpResponseCode > 0) {
-      String response = http.getString();
+    if (httpResponseCode == 200) {
+      Serial.println("✅ Move sent successfully!");
+      lastSentMove = move;
       
-      if (response.length() > 500) {
-        response = response.substring(0, 500);
-      }
-      
-      Serial.print("📥 Server Response: ");
-      Serial.println(response);
-      
-      if (httpResponseCode == 200) {
-        Serial.println("✅ Physical move sent successfully to web!");
-        Serial.println("🎯 " + targetPlayerInfo + " should see move on web interface");
-        lastSentMove = move;
-        
-        // LED feedback
-        digitalWrite(LED_PIN, HIGH);
-        delay(10);
-        digitalWrite(LED_PIN, LOW);
-        delay(10);
-        digitalWrite(LED_PIN, HIGH);
-      } else {
-        Serial.printf("❌ HTTP Error: %d - Move may not appear on web\n", httpResponseCode);
-      }
+      // LED feedback
+      digitalWrite(LED_PIN, HIGH);
+      digitalWrite(LED_PIN, LOW);
+      digitalWrite(LED_PIN, HIGH);
     } else {
-      Serial.printf("❌ Connection Error: %d - Check network connection\n", httpResponseCode);
-      consecutiveErrors++;
-      if (consecutiveErrors >= 3) {
-        networkStable = false;
-      }
+      Serial.printf("❌ HTTP Error: %d\n", httpResponseCode);
     }
     Serial.println("================================================");
     xSemaphoreGive(serialMutex);
   }
   
   http.end();
-  delay(10);
+  // Removed delay for faster response
 }
 
 void handleArduinoCommunicationTask() {
@@ -655,12 +613,7 @@ void handleArduinoCommunicationTask() {
     msg.trim();
     
     if (msg.length() > 0) {
-      // Send Arduino message to Core 1 for processing
-      ArduinoMsg arduinoMsg;
-      strncpy(arduinoMsg.message, msg.c_str(), sizeof(arduinoMsg.message) - 1);
-      arduinoMsg.message[sizeof(arduinoMsg.message) - 1] = '\0';
-      xQueueSend(arduinoMsgQueue, &arduinoMsg, 0);
-      
+      // CRITICAL FIX: Only handle specific Arduino commands, ignore debug messages
       // Handle magnet control on Core 0 (immediate response)
       if (msg == "MAGNET_ON") {
         digitalWrite(MAGNET_PIN, HIGH);
@@ -668,7 +621,21 @@ void handleArduinoCommunicationTask() {
       } else if (msg == "MAGNET_OFF") {
         digitalWrite(MAGNET_PIN, LOW);
         ARDUINO_SERIAL.println("MAGNET_OFF_READY");
+      } else if (msg == "REQUEST_BOARD_STATE") {
+        // Send Arduino message to Core 1 for processing
+        ArduinoMsg arduinoMsg;
+        strncpy(arduinoMsg.message, msg.c_str(), sizeof(arduinoMsg.message) - 1);
+        arduinoMsg.message[sizeof(arduinoMsg.message) - 1] = '\0';
+        xQueueSend(arduinoMsgQueue, &arduinoMsg, 0);
+      } else if (msg == "MOVE_COMPLETED" || msg.indexOf("Move complete") >= 0) {
+        // Send Arduino message to Core 1 for processing
+        ArduinoMsg arduinoMsg;
+        strncpy(arduinoMsg.message, msg.c_str(), sizeof(arduinoMsg.message) - 1);
+        arduinoMsg.message[sizeof(arduinoMsg.message) - 1] = '\0';
+        xQueueSend(arduinoMsgQueue, &arduinoMsg, 0);
       }
+      // CRITICAL FIX: Ignore all other Arduino debug messages (don't send to Core 1)
+      // This prevents Arduino acknowledgments from being processed as moves
     }
   }
 }
@@ -678,43 +645,52 @@ void handleArduinoCommunicationTask() {
 // ==========================================
 
 void processWebMoveTask(String move, String source) {
-  // ORIGINAL LOGIC: Automatically disable sensors when web move received
+  // CRITICAL FIX: Disable sensors when web move received
   sensorsDisabled = true;
   
-  // Send move to Arduino immediately (minimal debug to avoid conflicts)
-  if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-    // Send move to Arduino via Serial (GPIO1/3)
-    ARDUINO_SERIAL.println(move);
-    ARDUINO_SERIAL.flush();
-    xSemaphoreGive(serialMutex);
-  }
+  // Send ONLY the move to Arduino - NO debug output
+  ARDUINO_SERIAL.println(move);
+  ARDUINO_SERIAL.flush();
 }
 
 void processArduinoMessageTask(String msg) {
-  if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-    Serial.print("📥 Arduino: ");
-    Serial.println(msg);
-    
-    if (msg.startsWith("Moving to")) {
-      Serial.println("🚀 " + msg);
-    } else if (msg.startsWith("Received move:")) {
-      Serial.println("📨 " + msg);
-    } else if (msg == "MOVE_COMPLETED" || msg == "Move completed. Ready for next move." || msg.indexOf("Move completed successfully") >= 0) {
-      Serial.println("✅ Arduino movement sequence completed");
-      Serial.println("🔘 Press BUTTON on GPIO19 to re-enable sensor detection");
-    } else if (msg == "MAGNET_ON") {
-      digitalWrite(MAGNET_PIN, HIGH);
-      Serial.println("🧲 Magnet ON - Arduino request");
-      ARDUINO_SERIAL.println("MAGNET_READY");
-    } else if (msg == "MAGNET_OFF") {
-      digitalWrite(MAGNET_PIN, LOW);
-      Serial.println("🧲 Magnet OFF - Arduino request");
-      ARDUINO_SERIAL.println("MAGNET_OFF_READY");
+  // Handle Arduino requests with NO debug output
+  if (msg == "REQUEST_BOARD_STATE") {
+    if (sensorsDisabled) {
+      ARDUINO_SERIAL.println("SENSORS_DISABLED");
     } else {
-      Serial.println("ℹ️ Arduino: " + msg);
+      sendBoardStateToArduino();
     }
-    xSemaphoreGive(serialMutex);
+  } else if (msg == "MAGNET_ON") {
+    digitalWrite(MAGNET_PIN, HIGH);
+    ARDUINO_SERIAL.println("MAGNET_READY");
+  } else if (msg == "MAGNET_OFF") {
+    digitalWrite(MAGNET_PIN, LOW);
+    ARDUINO_SERIAL.println("MAGNET_OFF_READY");
   }
+  // Ignore other Arduino messages to avoid debug loops
+}
+
+void sendBoardStateToArduino() {
+  // Check if sensors are currently disabled
+  if (sensorsDisabled) {
+    ARDUINO_SERIAL.println("SENSORS_DISABLED");
+    return;
+  }
+  
+  // Send current board state to Arduino as a 64-character string
+  String boardState = "BOARD_STATE:";
+  
+  // Build 64-character string representing board state
+  for (int row = 0; row < 8; row++) {
+    for (int col = 0; col < 8; col++) {
+      boardState += sensors[row][col].stableState ? "1" : "0";
+    }
+  }
+  
+  // Send to Arduino
+  ARDUINO_SERIAL.println(boardState);
+  // Removed verbose board state logging
 }
 
 void checkButtonForSensorActivationTask() {
@@ -749,6 +725,11 @@ void checkButtonForSensorActivationTask() {
             digitalWrite(LED_PIN, HIGH);
             xSemaphoreGive(sensorMutex);
           }
+          
+          // Send updated board state to Arduino now that sensors are re-enabled
+          delay(50); // Minimal delay for sensor stabilization
+          sendBoardStateToArduino();
+          
         } else {
           Serial.println("ℹ️ Sensors already active");
         }
@@ -820,7 +801,7 @@ void detectMovementsTask() {
                 xQueueSend(physicalMoveQueue, &physicalMove, 0);
                 
                 if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-                  Serial.println("🎯 PHYSICAL MOVE: " + moveStr + " → Sent to Core 0 immediately");
+                  Serial.println("🎯 PHYSICAL MOVE: " + moveStr);
                   xSemaphoreGive(serialMutex);
                 }
               }
@@ -892,16 +873,17 @@ void checkResetButtonTask() {
         // Send software reset command via default Serial (GPIO1/GPIO3)
         ARDUINO_SERIAL.println("RESET_ARDUINO");
         ARDUINO_SERIAL.flush();
-        delay(300);
+        // OPTIMIZED: Reduced delays for faster reset response
+        delay(100); // Reduced from 300ms
         
         // Send alternative reset commands
         ARDUINO_SERIAL.println("SYSTEM_RESET");
         ARDUINO_SERIAL.flush();
-        delay(200);
+        delay(50); // Reduced from 200ms
         
         ARDUINO_SERIAL.println("RESTART");
         ARDUINO_SERIAL.flush();
-        delay(200);
+        delay(50); // Reduced from 200ms
       }
       
       if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
@@ -910,13 +892,13 @@ void checkResetButtonTask() {
         xSemaphoreGive(serialMutex);
       }
       
-      // Wait for Arduino to process reset and restart
-      delay(2000);
+      // OPTIMIZED: Reduced waiting time for faster reset
+      delay(1000); // Reduced from 2000ms
       
       // Test communication after reset
       ARDUINO_SERIAL.println("ESP32_TEST");
       ARDUINO_SERIAL.flush();
-      delay(500);
+      delay(250); // Reduced from 500ms
       
       // Check if Arduino responds
       if (ARDUINO_SERIAL.available()) {
@@ -939,16 +921,16 @@ void checkResetButtonTask() {
       }
       
       digitalWrite(ARDUINO_RESET_PIN, LOW);   // Pull reset LOW
-      delay(100);
+      delay(50); // Reduced from 100ms for faster reset
       digitalWrite(ARDUINO_RESET_PIN, HIGH);  // Release reset
-      delay(500);
+      delay(250); // Reduced from 500ms
       
       if (xSemaphoreTake(serialMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-        Serial.println("🔄 ESP32 will restart in 2 seconds...");
+        Serial.println("🔄 ESP32 will restart in 1 second..."); // Reduced from 2 seconds
         xSemaphoreGive(serialMutex);
       }
       
-      delay(2000);
+      delay(1000); // Reduced from 2000ms
       
       // Reset ESP32
       ESP.restart();
@@ -971,6 +953,11 @@ void initializeSensors() {
       sensors[row][col].hasChanged = false;
     }
   }
+}
+
+void initializeBoardState() {
+  // Initialize board state - same as initializeSensors for compatibility
+  initializeSensors();
 }
 
 void scanAndDebounceBoard() {

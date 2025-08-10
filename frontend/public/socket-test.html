@@ -1,0 +1,39 @@
+// Simple HTML page to test Socket.IO connection from browser
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Socket.IO Test</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+<body>
+    <h1>Socket.IO Connection Test</h1>
+    <div id="status">Connecting...</div>
+    <div id="events"></div>
+    
+    <script>
+        const socket = io('http://localhost:3001');
+        const statusDiv = document.getElementById('status');
+        const eventsDiv = document.getElementById('events');
+        
+        socket.on('connect', () => {
+            statusDiv.innerHTML = `✅ Connected! Socket ID: ${socket.id}`;
+            socket.emit('joinGame', 'singleplayer-default');
+            eventsDiv.innerHTML += '<div>🏠 Joined room: singleplayer-default</div>';
+        });
+        
+        socket.on('physicalMove', (data) => {
+            eventsDiv.innerHTML += `<div>📥 Physical Move: ${JSON.stringify(data)}</div>`;
+            console.log('Physical move received:', data);
+        });
+        
+        socket.on('moveMade', (data) => {
+            eventsDiv.innerHTML += `<div>📥 Move Made: ${JSON.stringify(data)}</div>`;
+            console.log('Move made received:', data);
+        });
+        
+        socket.on('disconnect', () => {
+            statusDiv.innerHTML = '❌ Disconnected';
+        });
+    </script>
+</body>
+</html>

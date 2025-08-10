@@ -34,17 +34,14 @@
 #define Y_LIMIT_PIN 10
 
 // === Stepper motor and board settings
-const int step_delay = 550; // microseconds
+const int step_delay = 450; // OPTIMIZED: Reduced from 550 to 450 microseconds for faster motor movement
 const long steps_per_cm = 419;
-const float initial_square_size_cm = 5.0;    // Square size before reaching (0,0)
-const float final_square_size_cm = 5.34;     // Square size after reaching (0,0)
-float current_square_size_cm = initial_square_size_cm;
-long current_steps_per_square = steps_per_cm * initial_square_size_cm;
+const float square_size_cm = 5.34; // ORIGINAL WORKING: Single square size value
+const long steps_per_square = steps_per_cm * square_size_cm; // ORIGINAL WORKING: Simple calculation
 
 // === Current position (chess grid coordinate)
 int currentX = -2;
 int currentY = 0;
-bool hasReachedOrigin = false;
 
 // === INTELLIGENT PIECE DETECTION SYSTEM ===
 // Optimized: Use bit array instead of bool array to save memory
@@ -67,7 +64,7 @@ struct KnightPathInfo {
 
 // === Setup
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(115200); // Keep optimized serial speed
 
   pinMode(A_STEP_PIN, OUTPUT);
   pinMode(A_DIR_PIN, OUTPUT);
@@ -84,20 +81,29 @@ void setup() {
   initializeBoardState();
 
   homeToOrigin();
-  delay(500);
+  delay(200); // OPTIMIZED: Reduced from 500ms for faster initialization
 
   applyOffset(0.4, 0.85);
-  delay(500);
+  delay(200); // OPTIMIZED: Reduced from 500ms
 
   moveOnlyX(2);
   currentX = 0;
   currentY = 0;
   
-  updateSquareSize();
-
+  // ENHANCED DEBUGGING: Confirm initial position
+  Serial.print(F("🎯 INITIAL POSITION SET: ("));
+  Serial.print(currentX);
+  Serial.print(F(","));
+  Serial.print(currentY);
+  Serial.print(F(") = "));
+  Serial.println(getSquareName(currentX, currentY));
+  Serial.println(F("📍 COORDINATE SYSTEM: (0,0)=h1, (1,0)=g1, (7,0)=a1"));
+  
   Serial.println(F("READY - Memory Optimized System Active"));
   Serial.println(F("🐴 Knight moves optimized"));
   Serial.println(F("📡 Board state tracking enabled"));
+  Serial.println(F("🔧 Enhanced debugging enabled"));
+  Serial.println(F("================================================"));
 }
 
 // === Main Loop
@@ -105,6 +111,13 @@ void loop() {
   if (Serial.available()) {
     String move = Serial.readStringUntil('\n');
     move.trim();
+
+    // ENHANCED DEBUGGING: Log all received communication
+    Serial.print(F("📨 RAW RECEIVED: '"));
+    Serial.print(move);
+    Serial.print(F("' (Length: "));
+    Serial.print(move.length());
+    Serial.println(F(")"));
 
     // Handle reset command from ESP32
     if (move == F("RESET_ARDUINO")) {
@@ -121,16 +134,13 @@ void loop() {
       // Reset all variables
       currentX = -2;
       currentY = 0;
-      hasReachedOrigin = false;
-      current_square_size_cm = initial_square_size_cm;
-      current_steps_per_square = steps_per_cm * initial_square_size_cm;
       
       // Reset capture flags
       resetCaptureFlags();
       
       // Send confirmation to ESP32
       Serial.println(F("ARDUINO_RESET_COMPLETE"));
-      delay(100);
+      delay(50); // OPTIMIZED: Reduced from 100ms for faster reset response
       
       // Re-initialize system
       setup();
@@ -144,20 +154,74 @@ void loop() {
       return;  // Don't continue processing
     }
 
+    // Handle board state update from ESP32
+    if (move.startsWith("BOARD_STATE:")) {
+      updateBoardStateFromESP32(move);
+      return;
+    }
+
+    // ENHANCED DEBUGGING: Check move format and parse
+    Serial.print(F("🔍 PARSING MOVE: "));
+    Serial.println(move);
+    
     if (move.length() == 5 && move.charAt(2) == '-') {
       String from = move.substring(0, 2);
       String to = move.substring(3, 5);
 
-      Serial.print(F("Received move: "));
-      Serial.println(move);
+      Serial.print(F("✅ VALID MOVE FORMAT - From: "));
+      Serial.print(from);
+      Serial.print(F(", To: "));
+      Serial.println(to);
       
-      // Check if this is a capture move
-      checkForCaptureMove(from, to);
-
+      // ENHANCED DEBUGGING: Show coordinate conversion
       int fromX = fileToX(from.charAt(0));
       int fromY = rankToY(from.charAt(1));
       int toX = fileToX(to.charAt(0));
       int toY = rankToY(to.charAt(1));
+      
+      Serial.print(F("📍 COORDINATE CONVERSION:"));
+      Serial.print(F(" From "));
+      Serial.print(from);
+      Serial.print(F("("));
+      Serial.print(fromX);
+      Serial.print(F(","));
+      Serial.print(fromY);
+      Serial.print(F(") → To "));
+      Serial.print(to);
+      Serial.print(F("("));
+      Serial.print(toX);
+      Serial.print(F(","));
+      Serial.print(toY);
+      Serial.println(F(")"));
+      
+      // ENHANCED DEBUGGING: Show current position before move
+      Serial.print(F("🎯 CURRENT POSITION BEFORE MOVE: ("));
+      Serial.print(currentX);
+      Serial.print(F(","));
+      Serial.print(currentY);
+      Serial.println(F(")"));
+
+      // Check if this is a capture move
+      checkForCaptureMove(from, to);
+
+      int deltaX = toX - fromX;
+      int deltaY = toY - fromY;
+      bool isDiagonal = (abs(deltaX) == abs(deltaY)) && (deltaX != 0) && (deltaY != 0);
+      bool isKnight = isKnightMove(deltaX, deltaY);
+
+      // ENHANCED DEBUGGING: Movement analysis
+      Serial.print(F("📐 MOVEMENT ANALYSIS: Delta("));
+      Serial.print(deltaX);
+      Serial.print(F(","));
+      Serial.print(deltaY);
+      Serial.print(F(") - "));
+      if (isKnight) {
+        Serial.println(F("KNIGHT MOVE"));
+      } else if (isDiagonal) {
+        Serial.println(F("DIAGONAL MOVE"));
+      } else {
+        Serial.println(F("STRAIGHT MOVE"));
+      }
 
       // Handle capture sequence if needed
       if (isCaptureMove) {
@@ -167,37 +231,45 @@ void loop() {
         executeCaptureRemoval(captureTargetX, captureTargetY);
         
         Serial.println(F("✅ Captured piece removed"));
-        delay(500);
+        delay(200); // OPTIMIZED: Reduced from 500ms for faster capture sequence
       }
 
-      int deltaX = toX - fromX;
-      int deltaY = toY - fromY;
-      bool isDiagonal = (abs(deltaX) == abs(deltaY)) && (deltaX != 0) && (deltaY != 0);
-      bool isKnight = isKnightMove(deltaX, deltaY);
+      // Request current board state from ESP32 before moving (only if sensors are enabled)
+      Serial.println(F("REQUEST_BOARD_STATE"));
+      waitForBoardStateResponse();
 
+      Serial.print(F("🚀 STARTING MOVE EXECUTION: "));
+      Serial.println(move);
       Serial.print(F("Moving to source: "));
       Serial.println(from);
       moveToPosition(fromX, fromY);
       currentX = fromX;
       currentY = fromY;
       
+      // ENHANCED DEBUGGING: Position after moving to source
+      Serial.print(F("✅ REACHED SOURCE - Current Position: ("));
+      Serial.print(currentX);
+      Serial.print(F(","));
+      Serial.print(currentY);
+      Serial.println(F(")"));
+      
       // Update board state - piece lifted from source
       updatePiecePosition(fromX, fromY, -1, -1);
       
-      delay(200);
+      delay(100); // OPTIMIZED: Reduced from 200ms for faster piece pickup
 
       Serial.println(F("MAGNET_ON"));
       waitForESPResponse(F("MAGNET_READY"));
-      delay(500);
+      delay(200); // OPTIMIZED: Reduced from 500ms for faster magnet engagement
 
       if (isKnight) {
-        Serial.println(F("🐴 INTELLIGENT KNIGHT MOVE"));
+        Serial.println(F("🐴 EXECUTING INTELLIGENT KNIGHT MOVE"));
         executeIntelligentKnightMove(fromX, fromY, toX, toY);
       } else if (isDiagonal) {
-        Serial.println(F("Diagonal move detected"));
+        Serial.println(F("📐 EXECUTING DIAGONAL MOVE"));
         moveDiagonal(deltaX, deltaY);
       } else {
-        Serial.print(F("Moving to destination: "));
+        Serial.print(F("➡️ EXECUTING STRAIGHT MOVE to: "));
         Serial.println(to);
         moveToPosition(toX, toY);
       }
@@ -205,11 +277,19 @@ void loop() {
       currentX = toX;
       currentY = toY;
       
+      // ENHANCED DEBUGGING: Final position confirmation
+      Serial.print(F("🏁 FINAL POSITION: ("));
+      Serial.print(currentX);
+      Serial.print(F(","));
+      Serial.print(currentY);
+      Serial.print(F(") = "));
+      Serial.println(getSquareName(currentX, currentY));
+      
       // Update board state - piece placed at destination
       updatePiecePosition(-1, -1, toX, toY);
 
       Serial.println(F("Move complete"));
-      delay(200);
+      delay(100); // OPTIMIZED: Reduced from 200ms for faster move completion
 
       Serial.println(F("MAGNET_OFF"));
       waitForESPResponse(F("MAGNET_OFF_READY"));
@@ -217,7 +297,25 @@ void loop() {
       // Reset capture flags
       resetCaptureFlags();
       
-      Serial.println(F("Move completed successfully. Ready for next move."));
+      Serial.println(F("✅ MOVE COMPLETED SUCCESSFULLY. Ready for next move."));
+      Serial.println(F("================================================"));
+    } else {
+      // ENHANCED DEBUGGING: Invalid move format
+      Serial.print(F("❌ INVALID MOVE FORMAT: '"));
+      Serial.print(move);
+      Serial.print(F("' - Expected format: XX-XX (e.g., e2-e4)"));
+      Serial.print(F(" - Length: "));
+      Serial.print(move.length());
+      if (move.length() > 0) {
+        Serial.print(F(" - Char at 2: '"));
+        if (move.length() > 2) {
+          Serial.print(move.charAt(2));
+        } else {
+          Serial.print(F("N/A"));
+        }
+        Serial.print(F("'"));
+      }
+      Serial.println();
     }
   }
 }
@@ -263,6 +361,61 @@ void setInitialPiecePositions() {
   Serial.println(F("📋 Initial piece positions set"));
 }
 
+void updateBoardStateFromESP32(String boardStateMessage) {
+  // Parse board state message from ESP32
+  // Format: "BOARD_STATE:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  // Each character represents one square (0=empty, 1=occupied)
+  
+  if (boardStateMessage.length() < 75) { // "BOARD_STATE:" + 64 characters
+    Serial.println(F("❌ Invalid board state message"));
+    return;
+  }
+  
+  String boardData = boardStateMessage.substring(12); // Remove "BOARD_STATE:" prefix
+  
+  if (boardData.length() != 64) {
+    Serial.println(F("❌ Board state data must be 64 characters"));
+    return;
+  }
+  
+  Serial.println(F("📡 Updating board state from ESP32..."));
+  
+  // Clear current board state
+  for (byte i = 0; i < 8; i++) {
+    squareOccupied[i] = 0;
+  }
+  
+  // Update board state from ESP32 sensor data
+  for (int i = 0; i < 64; i++) {
+    int x = i % 8;
+    int y = i / 8;
+    bool occupied = (boardData.charAt(i) == '1');
+    setSquareOccupied(x, y, occupied);
+  }
+  
+  Serial.println(F("✅ Board state synchronized with ESP32"));
+  
+  // Print board state for debugging
+  printBoardState();
+}
+
+void printBoardState() {
+  Serial.println(F("📋 Current Board State:"));
+  Serial.println(F("   a b c d e f g h"));
+  
+  for (int y = 7; y >= 0; y--) { // Print from rank 8 to rank 1
+    Serial.print(y + 1);
+    Serial.print(F("  "));
+    
+    for (int x = 0; x < 8; x++) {
+      Serial.print(getSquareOccupied(x, y) ? "X" : ".");
+      Serial.print(" ");
+    }
+    Serial.println();
+  }
+  Serial.println();
+}
+
 void updatePiecePosition(int fromX, int fromY, int toX, int toY) {
   // Clear source square
   if (fromX >= 0 && fromX < 8 && fromY >= 0 && fromY < 8) {
@@ -293,6 +446,12 @@ void checkForCaptureMove(String from, String to) {
   }
 }
 
+// CRITICAL: Add missing updateSquareSize function from working version
+void updateSquareSize() {
+  // REMOVED: Dynamic square size feature - using simple constant like working version
+  // This was causing motor calculation issues in the optimized version
+}
+
 void executeCaptureRemoval(int captureX, int captureY) {
   Serial.println(F("📤 CAPTURE SEQUENCE - Removing piece"));
   
@@ -301,12 +460,12 @@ void executeCaptureRemoval(int captureX, int captureY) {
   currentX = captureX;
   currentY = captureY;
   
-  delay(200);
+  delay(100); // OPTIMIZED: Reduced from 200ms for faster capture approach
   
   // Engage magnet with captured piece
   Serial.println(F("MAGNET_ON"));
   waitForESPResponse(F("MAGNET_READY"));
-  delay(500);
+  delay(200); // OPTIMIZED: Reduced from 500ms for faster capture magnet engagement
   
   // Simple boundary removal - move to nearest edge
   if (captureX < 4) {
@@ -322,7 +481,7 @@ void executeCaptureRemoval(int captureX, int captureY) {
   // Update board state - captured piece removed
   updatePiecePosition(captureX, captureY, -1, -1);
   
-  delay(300);
+  delay(150); // OPTIMIZED: Reduced from 300ms for faster capture completion
 }
 
 void resetCaptureFlags() {
@@ -364,35 +523,122 @@ KnightPathInfo analyzeKnightPaths(int fromX, int fromY, int toX, int toY) {
   int deltaX = toX - fromX;
   int deltaY = toY - fromY;
   
-  // Path 1: Direct L-shape (X first, then Y)
-  bestPath.pathType = 1;
-  bestPath.estimatedDistance = abs(deltaX) + abs(deltaY);
-  bestPath.intermediateX = fromX + deltaX;
-  bestPath.intermediateY = fromY;
-  bestPath.pathClear = isSquareFree(bestPath.intermediateX, bestPath.intermediateY);
+  Serial.print("🔍 Analyzing knight paths: ");
+  Serial.print(getSquareName(fromX, fromY));
+  Serial.print("→");
+  Serial.print(getSquareName(toX, toY));
+  Serial.print(" Δ(");
+  Serial.print(deltaX);
+  Serial.print(",");
+  Serial.print(deltaY);
+  Serial.println(")");
   
-  // Path 2: Direct L-shape (Y first, then X) - check if better
-  byte altX = fromX;
-  byte altY = fromY + deltaY;
-  if (isSquareFree(altX, altY)) {
-    bestPath.pathType = 2;
-    bestPath.intermediateX = altX;
-    bestPath.intermediateY = altY;
-    bestPath.pathClear = true;
-    Serial.println(F("🎯 CLEAR Y→X PATH"));
-  } else if (bestPath.pathClear) {
-    Serial.println(F("🎯 CLEAR X→Y PATH"));
-  } else {
-    // Path 3: Grid avoidance
+  // PRIORITY 1: Check if there are pieces in the knight's path area FIRST
+  bool pathAreaClear = checkKnightPathArea(fromX, fromY, toX, toY);
+  
+  if (!pathAreaClear) {
+    // FORCE edge movement when ANY pieces detected in path area
     bestPath.pathType = 3;
-    bestPath.estimatedDistance = abs(deltaX) + abs(deltaY) + 0.5;
-    bestPath.intermediateX = 255; // No specific intermediate
+    bestPath.pathClear = false;
+    bestPath.estimatedDistance = abs(deltaX) + abs(deltaY);
+    bestPath.intermediateX = 255; // No specific intermediate for edge movement
     bestPath.intermediateY = 255;
-    bestPath.pathClear = true;
-    Serial.println(F("⚠️ BLOCKED - Using grid path"));
+    Serial.println("⚠️ PIECES DETECTED in knight path area - FORCING edge movement");
+    return bestPath; // Exit early - don't check corner squares
   }
   
+  // PRIORITY 2: Only check corner squares if path area is completely clear
+  Serial.println("✅ Path area completely clear - analyzing corner squares for optimal L-path");
+  
+  // Check Path 1: Direct L-shape (X first, then Y)
+  int cornerX1 = fromX + deltaX;
+  int cornerY1 = fromY;
+  bool path1Clear = isSquareFree(cornerX1, cornerY1);
+  
+  // Check Path 2: Direct L-shape (Y first, then X)
+  int cornerX2 = fromX;
+  int cornerY2 = fromY + deltaY;
+  bool path2Clear = isSquareFree(cornerX2, cornerY2);
+  
+  Serial.print("🎯 Path 1 (X→Y): ");
+  Serial.print(getSquareName(fromX, fromY));
+  Serial.print("→");
+  Serial.print(getSquareName(cornerX1, cornerY1));
+  Serial.print("→");
+  Serial.print(getSquareName(toX, toY));
+  Serial.print(" - ");
+  Serial.println(path1Clear ? "CLEAR ✅" : "BLOCKED ❌");
+  
+  Serial.print("🎯 Path 2 (Y→X): ");
+  Serial.print(getSquareName(fromX, fromY));
+  Serial.print("→");
+  Serial.print(getSquareName(cornerX2, cornerY2));
+  Serial.print("→");
+  Serial.print(getSquareName(toX, toY));
+  Serial.print(" - ");
+  Serial.println(path2Clear ? "CLEAR ✅" : "BLOCKED ❌");
+  
+  // Choose best direct path when area is clear
+  if (path1Clear && path2Clear) {
+    bestPath.pathType = (abs(deltaX) >= abs(deltaY)) ? 1 : 2;
+    bestPath.pathClear = true;
+    Serial.println("✅ Both corner paths clear - using optimal direct L-path");
+  } else if (path1Clear) {
+    bestPath.pathType = 1;
+    bestPath.pathClear = true;
+    Serial.println("✅ Using Path 1 (X→Y) - corner clear");
+  } else if (path2Clear) {
+    bestPath.pathType = 2;
+    bestPath.pathClear = true;
+    Serial.println("✅ Using Path 2 (Y→X) - corner clear");
+  } else {
+    // Both corner squares blocked even though area is clear
+    bestPath.pathType = 3;
+    bestPath.pathClear = false;
+    Serial.println("⚠️ Both corner squares BLOCKED - using edge movement");
+  }
+  
+  bestPath.estimatedDistance = abs(deltaX) + abs(deltaY);
+  bestPath.intermediateX = (bestPath.pathType == 1) ? cornerX1 : cornerX2;
+  bestPath.intermediateY = (bestPath.pathType == 1) ? cornerY1 : cornerY2;
+  
   return bestPath;
+}
+
+// New function to check if pieces are in the knight's path area
+bool checkKnightPathArea(int fromX, int fromY, int toX, int toY) {
+  int deltaX = toX - fromX;
+  int deltaY = toY - fromY;
+  
+  // Define the rectangular area between source and destination
+  int minX = min(fromX, toX);
+  int maxX = max(fromX, toX);
+  int minY = min(fromY, toY);
+  int maxY = max(fromY, toY);
+  
+  Serial.print("🔍 Checking path area: ");
+  Serial.print(getSquareName(minX, minY));
+  Serial.print(" to ");
+  Serial.println(getSquareName(maxX, maxY));
+  
+  // Check all squares in the path rectangle (excluding source and destination)
+  for (int x = minX; x <= maxX; x++) {
+    for (int y = minY; y <= maxY; y++) {
+      if ((x == fromX && y == fromY) || (x == toX && y == toY)) {
+        continue; // Skip source and destination squares
+      }
+      
+      if (!isSquareFree(x, y)) {
+        Serial.print("❌ Piece found at ");
+        Serial.print(getSquareName(x, y));
+        Serial.println(" - path area blocked");
+        return false; // Path area has pieces
+      }
+    }
+  }
+  
+  Serial.println("✅ Path area is clear of pieces");
+  return true; // Path area is clear
 }
 
 bool isSquareFree(int x, int y) {
@@ -406,129 +652,150 @@ String getSquareName(int x, int y) {
   if (x < 0 || x >= 8 || y < 0 || y >= 8) {
     return "??";
   }
-  char file = 'a' + (7 - x); // Convert to chess notation
-  char rank = '1' + y;
+  char file = 'a' + (7 - x);  // ORIGINAL WORKING: x=0 -> 'h', x=1 -> 'g', ..., x=7 -> 'a'
+  char rank = '1' + y;  // y=0 -> '1', y=1 -> '2', ..., y=7 -> '8'
   return String(file) + String(rank);
 }
 
 void executeSelectedKnightPath(KnightPathInfo path, int deltaX, int deltaY) {
+  Serial.println("🚀 EXECUTING KNIGHT MOVEMENT:");
+  
   switch (path.pathType) {
     case 1:
-      // Direct L-path: X first, then Y
-      Serial.println(F("🚀 EXECUTING: Direct L-path (X→Y)"));
+      // Direct L-path: X first, then Y (corner square is clear)
+      Serial.println("   � Direct L-path: X→Y movement");
+      Serial.print("   Step 1: Move ");
+      Serial.print(deltaX);
+      Serial.print(" squares ");
+      Serial.println(deltaX > 0 ? "right (X+)" : "left (X-)");
       moveOnlyX(deltaX);
+      
+      Serial.print("   Step 2: Move ");
+      Serial.print(deltaY);
+      Serial.print(" squares ");
+      Serial.println(deltaY > 0 ? "up (Y+)" : "down (Y-)");
       moveOnlyY(deltaY);
       break;
       
     case 2:
-      // Direct L-path: Y first, then X
-      Serial.println(F("🚀 EXECUTING: Direct L-path (Y→X)"));
+      // Direct L-path: Y first, then X (corner square is clear)
+      Serial.println("   � Direct L-path: Y→X movement");
+      Serial.print("   Step 1: Move ");
+      Serial.print(deltaY);
+      Serial.print(" squares ");
+      Serial.println(deltaY > 0 ? "up (Y+)" : "down (Y-)");
       moveOnlyY(deltaY);
+      
+      Serial.print("   Step 2: Move ");
+      Serial.print(deltaX);
+      Serial.print(" squares ");
+      Serial.println(deltaX > 0 ? "right (X+)" : "left (X-)");
       moveOnlyX(deltaX);
       break;
       
     case 3:
-      // Grid avoidance with minimal margins
-      Serial.println(F("🚀 EXECUTING: Grid minimal path"));
+      // Edge movement between squares (both corner squares blocked)
+      Serial.println("   � Edge movement: Traveling between squares to avoid pieces");
       executeGridMinimalPath(deltaX, deltaY);
+      break;
+      
+    default:
+      Serial.println("❌ ERROR: Unknown knight path type");
       break;
   }
   
-  Serial.println(F("✅ Knight movement completed"));
+  Serial.println("✅ Knight movement sequence completed successfully");
 }
 
 void executeGridMinimalPath(int deltaX, int deltaY) {
-  // Use minimal grid margins (quarter-square instead of half-square)
-  float quarterSquareSteps = current_steps_per_square * 0.25;
+  // Enhanced knight edge movement - moves between squares when L-path blocked
+  Serial.println("🐴 EDGE MOVEMENT: Knight moving between squares to avoid pieces");
   
-  Serial.println("📐 Step 1: Minimal margin offset (0.25 squares)...");
+  long halfSquareSteps = steps_per_square / 2; // ORIGINAL WORKING: Use simple steps_per_square
+  long fullSquareSteps = steps_per_square;
   
-  // Move to minimal top-left margin
-  digitalWrite(A_DIR_PIN, LOW);  // X-
-  digitalWrite(B_DIR_PIN, LOW);
-  for (long i = 0; i < (long)quarterSquareSteps; i++) {
-    stepBoth();
-  }
+  // Example: g1→f3 (deltaX=-1, deltaY=+2) when g2 is blocked
+  // Solution: g1 → (g1+f1)/2 → f3 (move to edge between g1-f1, then straight up)
   
-  digitalWrite(A_DIR_PIN, HIGH); // Y+
-  digitalWrite(B_DIR_PIN, LOW);
-  for (long i = 0; i < (long)quarterSquareSteps; i++) {
-    stepBoth();
-  }
+  Serial.println("📐 Step 1: Move to edge between squares...");
   
-  Serial.println("📐 Step 2: Main L-movement along grid...");
-  
-  // Execute the L-movement with grid clearance
-  long fullSquareSteps = current_steps_per_square;
-  
-  if (abs(deltaX) == 2) {
-    // X movement first
-    long xSteps = abs(deltaX) * fullSquareSteps;
+  // Move to the edge (halfway point) in the shorter direction first
+  if (abs(deltaX) == 1 && abs(deltaY) == 2) {
+    // Move halfway in X direction (to edge between current and target file)
+    Serial.print("   Moving ");
+    Serial.print(deltaX > 0 ? "right" : "left");
+    Serial.println(" to edge (0.5 squares)");
+    
+    // X MOVEMENT: Both motors same direction
     digitalWrite(A_DIR_PIN, deltaX > 0 ? HIGH : LOW);
     digitalWrite(B_DIR_PIN, deltaX > 0 ? HIGH : LOW);
-    
-    Serial.print("   X movement: ");
-    Serial.print(deltaX);
-    Serial.println(" squares");
-    
-    for (long i = 0; i < xSteps; i++) {
+    for (long i = 0; i < halfSquareSteps; i++) {
       stepBoth();
     }
     
-    // Y movement
-    long ySteps = abs(deltaY) * fullSquareSteps;
+    // Now move full distance in Y direction along the edge
+    Serial.print("   Moving ");
+    Serial.print(deltaY > 0 ? "up" : "down");
+    Serial.print(" along edge (");
+    Serial.print(deltaY);
+    Serial.println(" squares)");
+    
+    // Y MOVEMENT: Motors opposite directions
     digitalWrite(A_DIR_PIN, deltaY > 0 ? HIGH : LOW);
     digitalWrite(B_DIR_PIN, deltaY > 0 ? LOW : HIGH);
-    
-    Serial.print("   Y movement: ");
-    Serial.print(deltaY);
-    Serial.println(" squares");
-    
-    for (long i = 0; i < ySteps; i++) {
-      stepBoth();
-    }
-  } else {
-    // Y movement first
-    long ySteps = abs(deltaY) * fullSquareSteps;
-    digitalWrite(A_DIR_PIN, deltaY > 0 ? HIGH : LOW);
-    digitalWrite(B_DIR_PIN, deltaY > 0 ? LOW : HIGH);
-    
-    Serial.print("   Y movement: ");
-    Serial.print(deltaY);
-    Serial.println(" squares");
-    
-    for (long i = 0; i < ySteps; i++) {
+    for (long i = 0; i < abs(deltaY) * fullSquareSteps; i++) {
       stepBoth();
     }
     
-    // X movement
-    long xSteps = abs(deltaX) * fullSquareSteps;
+    // Complete the final half square in X direction
+    Serial.println("   Completing final 0.5 squares to destination");
+    
+    // X MOVEMENT: Both motors same direction
     digitalWrite(A_DIR_PIN, deltaX > 0 ? HIGH : LOW);
     digitalWrite(B_DIR_PIN, deltaX > 0 ? HIGH : LOW);
+    for (long i = 0; i < halfSquareSteps; i++) {
+      stepBoth();
+    }
     
-    Serial.print("   X movement: ");
+  } else if (abs(deltaX) == 2 && abs(deltaY) == 1) {
+    // Move halfway in Y direction (to edge between current and target rank)
+    Serial.print("   Moving ");
+    Serial.print(deltaY > 0 ? "up" : "down");
+    Serial.println(" to edge (0.5 squares)");
+    
+    // Y MOVEMENT: Motors opposite directions
+    digitalWrite(A_DIR_PIN, deltaY > 0 ? HIGH : LOW);
+    digitalWrite(B_DIR_PIN, deltaY > 0 ? LOW : HIGH);
+    for (long i = 0; i < halfSquareSteps; i++) {
+      stepBoth();
+    }
+    
+    // Now move full distance in X direction along the edge
+    Serial.print("   Moving ");
+    Serial.print(deltaX > 0 ? "right" : "left");
+    Serial.print(" along edge (");
     Serial.print(deltaX);
-    Serial.println(" squares");
+    Serial.println(" squares)");
     
-    for (long i = 0; i < xSteps; i++) {
+    // X MOVEMENT: Both motors same direction
+    digitalWrite(A_DIR_PIN, deltaX > 0 ? HIGH : LOW);
+    digitalWrite(B_DIR_PIN, deltaX > 0 ? HIGH : LOW);
+    for (long i = 0; i < abs(deltaX) * fullSquareSteps; i++) {
+      stepBoth();
+    }
+    
+    // Complete the final half square in Y direction
+    Serial.println("   Completing final 0.5 squares to destination");
+    
+    // Y MOVEMENT: Motors opposite directions
+    digitalWrite(A_DIR_PIN, deltaY > 0 ? HIGH : LOW);
+    digitalWrite(B_DIR_PIN, deltaY > 0 ? LOW : HIGH);
+    for (long i = 0; i < halfSquareSteps; i++) {
       stepBoth();
     }
   }
   
-  Serial.println("📐 Step 3: Return to center (0.25 squares)...");
-  
-  // Return to center with minimal offset
-  digitalWrite(A_DIR_PIN, HIGH); // X+
-  digitalWrite(B_DIR_PIN, HIGH);
-  for (long i = 0; i < (long)quarterSquareSteps; i++) {
-    stepBoth();
-  }
-  
-  digitalWrite(A_DIR_PIN, LOW);  // Y-
-  digitalWrite(B_DIR_PIN, HIGH);
-  for (long i = 0; i < (long)quarterSquareSteps; i++) {
-    stepBoth();
-  }
+  Serial.println("✅ Edge movement completed - Knight avoided blocked squares");
 }
 
 // === Utility Functions
@@ -544,34 +811,55 @@ void waitForESPResponse(const __FlashStringHelper* expectedResponse) {
         return;
       }
     }
-    delay(10);
+    delay(5); // OPTIMIZED: Reduced from 10ms for faster ESP32 response checking
   }
   Serial.println(F("Timeout waiting for ESP32!"));
 }
 
-void updateSquareSize() {
-  if ((currentX >= 0 && currentY >= 0) && !hasReachedOrigin) {
-    current_square_size_cm = final_square_size_cm;
-    current_steps_per_square = steps_per_cm * current_square_size_cm;
-    hasReachedOrigin = true;
-    Serial.print("Square size updated to: ");
-    Serial.print(current_square_size_cm);
-    Serial.println(" cm");
+void waitForBoardStateResponse() {
+  unsigned long startTime = millis();
+  const unsigned long timeout = 5000; // 5 second timeout
+  
+  Serial.println(F("⏳ Waiting for board state from ESP32..."));
+  
+  while (millis() - startTime < timeout) {
+    if (Serial.available()) {
+      String response = Serial.readStringUntil('\n');
+      response.trim();
+      
+      if (response.startsWith("BOARD_STATE:")) {
+        updateBoardStateFromESP32(response);
+        Serial.println(F("✅ Board state received and updated"));
+        return;
+      } else if (response == "SENSORS_DISABLED") {
+        Serial.println(F("⚠️ ESP32 sensors disabled - using cached board state"));
+        return;
+      } else if (response.startsWith("MAGNET") || response.startsWith("ARDUINO")) {
+        // Handle other ESP32 responses but continue waiting for board state
+        continue;
+      }
+    }
+    delay(5); // OPTIMIZED: Reduced from 10ms for faster board state response
   }
+  
+  Serial.println(F("⚠️ Timeout waiting for board state - using cached state"));
 }
 
 void moveDiagonal(int deltaX, int deltaY) {
-  long stepsX = abs(deltaX) * current_steps_per_square;
-  long stepsY = abs(deltaY) * current_steps_per_square;
+  long stepsX = abs(deltaX) * steps_per_square;
+  long stepsY = abs(deltaY) * steps_per_square;
 
-  bool xDir = deltaX > 0 ? HIGH : LOW;
-  bool yDirA = deltaY > 0 ? HIGH : LOW;
-  bool yDirB = deltaY > 0 ? LOW : HIGH;
+  // ORIGINAL WORKING: Determine direction for each motor exactly like before
+  bool xDir = deltaX > 0 ? HIGH : LOW; // A and B same direction for X
+  bool yDirA = deltaY > 0 ? HIGH : LOW; // A motor for Y
+  bool yDirB = deltaY > 0 ? LOW : HIGH; // B motor opposite for Y
 
-  digitalWrite(A_DIR_PIN, xDir);
-  digitalWrite(B_DIR_PIN, xDir);
+  // ORIGINAL WORKING: Set directions based on quadrant
+  digitalWrite(A_DIR_PIN, deltaX > 0 ? HIGH : LOW);
+  digitalWrite(B_DIR_PIN, deltaX > 0 ? HIGH : LOW); // Start with X direction
 
-  long totalSteps = max(stepsX, stepsY);
+  // ORIGINAL WORKING: Bresenham-like interpolation
+  long totalSteps = max(stepsX, stepsY); // Use the larger number of steps
   long error = 0;
   long deltaError = min(stepsX, stepsY);
   long majorSteps = max(stepsX, stepsY);
@@ -582,27 +870,31 @@ void moveDiagonal(int deltaX, int deltaY) {
   Serial.print(", deltaY=");
   Serial.print(deltaY);
   Serial.print(", square size=");
-  Serial.print(current_square_size_cm);
+  Serial.print(square_size_cm);
   Serial.println(" cm");
 
   for (long i = 0; i < totalSteps; i++) {
     if (xMajor) {
+      // ORIGINAL WORKING: Step X (both motors same direction)
       digitalWrite(A_DIR_PIN, xDir);
       digitalWrite(B_DIR_PIN, xDir);
       stepBoth();
       error += deltaError;
       if (error >= majorSteps) {
+        // ORIGINAL WORKING: Step Y (motors opposite directions)
         digitalWrite(A_DIR_PIN, yDirA);
         digitalWrite(B_DIR_PIN, yDirB);
         stepBoth();
         error -= majorSteps;
       }
     } else {
+      // ORIGINAL WORKING: Step Y (motors opposite directions)
       digitalWrite(A_DIR_PIN, yDirA);
       digitalWrite(B_DIR_PIN, yDirB);
       stepBoth();
       error += deltaError;
       if (error >= majorSteps) {
+        // ORIGINAL WORKING: Step X (both motors same direction)
         digitalWrite(A_DIR_PIN, xDir);
         digitalWrite(B_DIR_PIN, xDir);
         stepBoth();
@@ -616,29 +908,49 @@ void moveToPosition(int targetX, int targetY) {
   int deltaX = targetX - currentX;
   int deltaY = targetY - currentY;
   
-  if (deltaX != 0) {
-    moveOnlyX(deltaX);
-    updateSquareSize();
-  }
-  if (deltaY != 0) {
-    moveOnlyY(deltaY);
-    updateSquareSize();
-  }
+  Serial.print(F("📍 Position Move: ("));
+  Serial.print(currentX);
+  Serial.print(F(","));
+  Serial.print(currentY);
+  Serial.print(F(") → ("));
+  Serial.print(targetX);
+  Serial.print(F(","));
+  Serial.print(targetY);
+  Serial.print(F(") | Delta: ("));
+  Serial.print(deltaX);
+  Serial.print(F(","));
+  Serial.print(deltaY);
+  Serial.println(F(")"));
+  
+  // ORIGINAL WORKING: L-shaped path: X first, then Y
+  if (deltaX != 0) moveOnlyX(deltaX);
+  if (deltaY != 0) moveOnlyY(deltaY);
 }
 
 int fileToX(char file) {
-  return 7 - (file - 'a');
+  return 7 - (file - 'a');  // ORIGINAL WORKING: a=7, b=6, c=5, d=4, e=3, f=2, g=1, h=0
 }
 
 int rankToY(char rank) {
-  return rank - '1';
+  return rank - '1';  // 1=0, 2=1, 3=2, ..., 8=7
 }
 
 void moveOnlyX(int squares) {
   if (squares == 0) return;
+  
+  Serial.print(F("🔧 X Movement: "));
+  Serial.print(squares);
+  Serial.print(F(" squares "));
+  Serial.print(squares > 0 ? F("RIGHT (+X)") : F("LEFT (-X)"));
+  Serial.print(F(" | Motors: A="));
+  Serial.print(squares > 0 ? F("HIGH") : F("LOW"));
+  Serial.print(F(", B="));
+  Serial.println(squares > 0 ? F("HIGH") : F("LOW"));
+  
+  // ORIGINAL WORKING: Both motors same direction for X movement
   digitalWrite(A_DIR_PIN, squares > 0 ? HIGH : LOW);
-  digitalWrite(B_DIR_PIN, squares > 0 ? HIGH : LOW);
-  long steps = abs(squares) * current_steps_per_square;
+  digitalWrite(B_DIR_PIN, squares > 0 ? HIGH : LOW);  // Both motors same direction for X movement
+  long steps = abs(squares) * steps_per_square;
   
   for (long i = 0; i < steps; i++) {
     stepBoth();
@@ -647,9 +959,20 @@ void moveOnlyX(int squares) {
 
 void moveOnlyY(int squares) {
   if (squares == 0) return;
-  digitalWrite(A_DIR_PIN, squares > 0 ? HIGH : LOW);
-  digitalWrite(B_DIR_PIN, squares > 0 ? LOW : HIGH);
-  long steps = abs(squares) * current_steps_per_square;
+  
+  Serial.print(F("🔧 Y Movement: "));
+  Serial.print(squares);
+  Serial.print(F(" squares "));
+  Serial.print(squares > 0 ? F("UP (+Y)") : F("DOWN (-Y)"));
+  Serial.print(F(" | Motors: A="));
+  Serial.print(squares > 0 ? F("HIGH") : F("LOW"));
+  Serial.print(F(", B="));
+  Serial.println(squares > 0 ? F("LOW") : F("HIGH"));
+  
+  // ORIGINAL WORKING: A motor direction, B motor opposite direction for Y movement
+  digitalWrite(A_DIR_PIN, squares > 0 ? HIGH : LOW);   // A motor direction
+  digitalWrite(B_DIR_PIN, squares > 0 ? LOW : HIGH);   // B motor opposite direction for Y movement
+  long steps = abs(squares) * steps_per_square;
   
   for (long i = 0; i < steps; i++) {
     stepBoth();
@@ -671,14 +994,14 @@ void homeToOrigin() {
   while (digitalRead(Y_LIMIT_PIN) == HIGH) {
     stepBoth();
   }
-  delay(300);
+  delay(150); // OPTIMIZED: Reduced from 300ms for faster homing
 
   digitalWrite(A_DIR_PIN, LOW);
   digitalWrite(B_DIR_PIN, LOW);
   while (digitalRead(X_LIMIT_PIN) == HIGH) {
     stepBoth();
   }
-  delay(500);
+  delay(250); // OPTIMIZED: Reduced from 500ms for faster homing
 
   currentX = -2;
   currentY = 0;
