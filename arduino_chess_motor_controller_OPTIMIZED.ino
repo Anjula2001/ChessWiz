@@ -34,9 +34,9 @@
 #define Y_LIMIT_PIN 10
 
 // === Stepper motor and board settings
-const int step_delay = 450; // OPTIMIZED: Reduced from 550 to 450 microseconds for faster motor movement
+const int step_delay = 350; // SPEED OPTIMIZED: Reduced from 450 to 350 microseconds for faster motor movement
 const long steps_per_cm = 419;
-const float initial_square_size_cm = 4.7;    // Square size before reaching (0,0) - for offset
+const float initial_square_size_cm = 4.8;    // Square size before reaching (0,0) - for offset
 const float final_square_size_cm = 5.34;     // Square size after reaching (0,0) - for moves
 float current_square_size_cm = initial_square_size_cm;
 long current_steps_per_square = steps_per_cm * initial_square_size_cm;
@@ -85,10 +85,10 @@ void setup() {
   initializeBoardState();
 
   homeToOrigin();
-  delay(200); // OPTIMIZED: Reduced from 500ms for faster initialization
+  delay(100); // SPEED OPTIMIZED: Reduced from 200ms for faster initialization
 
   applyOffset(0.4, 0.85);
-  delay(200); // OPTIMIZED: Reduced from 500ms
+  delay(100); // SPEED OPTIMIZED: Reduced from 200ms
 
   moveOnlyX(2);
   currentX = 0;
@@ -237,7 +237,7 @@ void loop() {
         executeCaptureRemoval(captureTargetX, captureTargetY);
         
         Serial.println(F("✅ Captured piece removed"));
-        delay(200); // OPTIMIZED: Reduced from 500ms for faster capture sequence
+        delay(50); // SPEED OPTIMIZED: Reduced from 200ms for faster capture sequence
       }
 
       // Request current board state from ESP32 before moving (only if sensors are enabled)
@@ -262,11 +262,11 @@ void loop() {
       // Update board state - piece lifted from source
       updatePiecePosition(fromX, fromY, -1, -1);
       
-      delay(100); // OPTIMIZED: Reduced from 200ms for faster piece pickup
+      delay(50); // SPEED OPTIMIZED: Reduced from 100ms for faster piece pickup
 
       Serial.println(F("MAGNET_ON"));
       waitForESPResponse(F("MAGNET_READY"));
-      delay(200); // OPTIMIZED: Reduced from 500ms for faster magnet engagement
+      delay(50); // SPEED OPTIMIZED: Reduced from 200ms for faster magnet engagement
 
       if (isKnight) {
         Serial.println(F("🐴 EXECUTING INTELLIGENT KNIGHT MOVE"));
@@ -295,7 +295,7 @@ void loop() {
       updatePiecePosition(-1, -1, toX, toY);
 
       Serial.println(F("Move complete"));
-      delay(100); // OPTIMIZED: Reduced from 200ms for faster move completion
+      delay(25); // SPEED OPTIMIZED: Reduced from 100ms for faster move completion
 
       Serial.println(F("MAGNET_OFF"));
       waitForESPResponse(F("MAGNET_OFF_READY"));
@@ -464,35 +464,103 @@ void updateSquareSize() {
 }
 
 void executeCaptureRemoval(int captureX, int captureY) {
-  Serial.println(F("📤 CAPTURE SEQUENCE - Removing piece"));
+  Serial.println(F("📤 CAPTURE SEQUENCE - Removing piece via board outline"));
+  Serial.print(F("🎯 Target: "));
+  Serial.print(getSquareName(captureX, captureY));
+  Serial.println(F(" (captured piece)"));
   
   // Move to captured piece location
   moveToPosition(captureX, captureY);
   currentX = captureX;
   currentY = captureY;
   
-  delay(100); // OPTIMIZED: Reduced from 200ms for faster capture approach
+  delay(50); // SPEED OPTIMIZED: Reduced from 100ms for faster capture approach
   
   // Engage magnet with captured piece
   Serial.println(F("MAGNET_ON"));
   waitForESPResponse(F("MAGNET_READY"));
-  delay(200); // OPTIMIZED: Reduced from 500ms for faster capture magnet engagement
+  delay(50); // SPEED OPTIMIZED: Reduced from 200ms for faster capture magnet engagement
   
-  // Simple boundary removal - move to nearest edge
-  if (captureX < 4) {
-    moveOnlyX(-captureX - 1); // Move to left edge
+  // BOARD OUTLINE REMOVAL: Calculate shortest path via square edges
+  // For left/right preference, calculate distances to left and right board edges
+  int distToLeft = captureX;           // Distance to left board edge (x = 0)
+  int distToRight = 7 - captureX;      // Distance to right board edge (x = 7)
+  
+  bool useRightPath = (distToRight <= distToLeft); // Use right if equal or shorter
+  
+  Serial.print(F("🔍 Edge calculation: Left="));
+  Serial.print(distToLeft);
+  Serial.print(F(" squares, Right="));
+  Serial.print(distToRight);
+  Serial.print(F(" squares → Using "));
+  Serial.println(useRightPath ? F("RIGHT path") : F("LEFT path"));
+  
+  if (useRightPath) {
+    // RIGHT PATH: Move to square edge first, then to board outline
+    Serial.println(F("📤 RIGHT PATH: Square edge → Board outline"));
+    
+    // Step 1: Move to top or bottom edge of current square (shorter distance)
+    int distToSquareTop = (captureY < 4) ? 1 : 0;    // Distance to top edge of square
+    int distToSquareBottom = (captureY < 4) ? 0 : 1; // Distance to bottom edge of square
+    
+    if (captureY < 4) {
+      // Move to bottom edge of board first (row 0)
+      Serial.println(F("🔸 Moving to bottom board edge"));
+      moveOnlyY(-captureY); // Move to y=0 (bottom row)
+      currentY = 0;
+    } else {
+      // Move to top edge of board first (row 7)  
+      Serial.println(F("🔸 Moving to top board edge"));
+      moveOnlyY(7 - captureY); // Move to y=7 (top row)
+      currentY = 7;
+    }
+    
+    // Step 2: Drag along board outline to right edge
+    Serial.println(F("🔸 Dragging along board outline to right edge"));
+    moveOnlyX(7 - captureX + 1); // Move to right board outline (x = 8)
+    currentX = 8;
+    
+    // Step 3: Move further right to drop zone outside board
+    Serial.println(F("� Moving to drop zone outside board"));
+    moveOnlyX(1); // Move 1 more square right to clear the board
+    currentX = 9;
+    
   } else {
-    moveOnlyX(7 - captureX + 1); // Move to right edge  
+    // LEFT PATH: Move to square edge first, then to board outline
+    Serial.println(F("📤 LEFT PATH: Square edge → Board outline"));
+    
+    // Step 1: Move to top or bottom edge of current square
+    if (captureY < 4) {
+      // Move to bottom edge of board first
+      Serial.println(F("🔸 Moving to bottom board edge"));
+      moveOnlyY(-captureY); // Move to y=0 (bottom row)
+      currentY = 0;
+    } else {
+      // Move to top edge of board first
+      Serial.println(F("🔸 Moving to top board edge"));
+      moveOnlyY(7 - captureY); // Move to y=7 (top row)
+      currentY = 7;
+    }
+    
+    // Step 2: Drag along board outline to left edge
+    Serial.println(F("🔸 Dragging along board outline to left edge"));
+    moveOnlyX(-captureX - 1); // Move to left board outline (x = -1)
+    currentX = -1;
+    
+    // Step 3: Captured piece ready at left board outline
+    Serial.println(F("🔸 Captured piece at left board outline"));
   }
   
-  // Drop captured piece
+  // Drop captured piece at board outline
+  Serial.println(F("📍 Dropping captured piece at board outline"));
   Serial.println(F("MAGNET_OFF"));
   waitForESPResponse(F("MAGNET_OFF_READY"));
   
   // Update board state - captured piece removed
   updatePiecePosition(captureX, captureY, -1, -1);
   
-  delay(150); // OPTIMIZED: Reduced from 300ms for faster capture completion
+  Serial.println(F("✅ Captured piece successfully removed via board outline"));
+  delay(50); // SPEED OPTIMIZED: Reduced from 150ms for faster capture completion
 }
 
 void resetCaptureFlags() {
@@ -812,7 +880,7 @@ void executeGridMinimalPath(int deltaX, int deltaY) {
 // === Utility Functions
 void waitForESPResponse(const __FlashStringHelper* expectedResponse) {
   unsigned long startTime = millis();
-  const unsigned long timeout = 10000;
+  const unsigned long timeout = 3000; // SPEED OPTIMIZED: Reduced from 10000ms to 3000ms
   
   while (millis() - startTime < timeout) {
     if (Serial.available()) {
@@ -829,7 +897,7 @@ void waitForESPResponse(const __FlashStringHelper* expectedResponse) {
 
 void waitForBoardStateResponse() {
   unsigned long startTime = millis();
-  const unsigned long timeout = 5000; // 5 second timeout
+  const unsigned long timeout = 2000; // SPEED OPTIMIZED: Reduced from 5000ms to 2000ms
   
   Serial.println(F("⏳ Waiting for board state from ESP32..."));
   
@@ -1005,14 +1073,14 @@ void homeToOrigin() {
   while (digitalRead(Y_LIMIT_PIN) == HIGH) {
     stepBoth();
   }
-  delay(150); // OPTIMIZED: Reduced from 300ms for faster homing
+  delay(100); // SPEED OPTIMIZED: Reduced from 150ms for faster homing
 
   digitalWrite(A_DIR_PIN, LOW);
   digitalWrite(B_DIR_PIN, LOW);
   while (digitalRead(X_LIMIT_PIN) == HIGH) {
     stepBoth();
   }
-  delay(250); // OPTIMIZED: Reduced from 500ms for faster homing
+  delay(150); // SPEED OPTIMIZED: Reduced from 250ms for faster homing
 
   currentX = -2;
   currentY = 0;
@@ -1036,4 +1104,38 @@ void applyOffset(float offsetX_cm, float offsetY_cm) {
   }
 
   Serial.println("Offset applied");
+}
+
+// Y movement with half-square offset for carrying captured pieces
+void moveOnlyYCapture(int squares) {
+  if (squares == 0) return;
+  
+  Serial.print(F("🔧 Y Movement WITH CAPTURE OFFSET: "));
+  Serial.print(squares);
+  Serial.print(F(" squares "));
+  Serial.print(squares > 0 ? F("UP (+Y)") : F("DOWN (-Y)"));
+  Serial.println(F(" + 0.5 square offset"));
+  
+  // ORIGINAL WORKING: A motor direction, B motor opposite direction for Y movement
+  digitalWrite(A_DIR_PIN, squares > 0 ? HIGH : LOW);   // A motor direction
+  digitalWrite(B_DIR_PIN, squares > 0 ? LOW : HIGH);   // B motor opposite direction for Y movement
+  
+  // Calculate steps: full squares + half square offset
+  long halfSquareSteps = (steps_per_cm * final_square_size_cm) / 2;  // Half square in steps
+  long fullSquareSteps = abs(squares) * steps_per_square;           // Full squares in steps
+  long totalSteps = fullSquareSteps + halfSquareSteps;              // Total movement
+  
+  Serial.print(F("   📏 Steps: "));
+  Serial.print(fullSquareSteps);
+  Serial.print(F(" ("));
+  Serial.print(abs(squares));
+  Serial.print(F(" squares) + "));
+  Serial.print(halfSquareSteps);
+  Serial.print(F(" (0.5 square) = "));
+  Serial.print(totalSteps);
+  Serial.println(F(" total steps"));
+  
+  for (long i = 0; i < totalSteps; i++) {
+    stepBoth();
+  }
 }
