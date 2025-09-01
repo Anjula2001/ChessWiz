@@ -7,7 +7,7 @@
 // - Minimal grid avoidance when blocked
 // - Real-time board state tracking
 // - Optimal distance calculation
-// - CAPTURE MOVE HANDLING with boundary removal
+// - SIMPLIFIED MOVE HANDLING with direct execution
 //
 // 🐴 KNIGHT OPTIMIZATION:
 // - Analyzes all 64 squares for piece positions
@@ -15,11 +15,10 @@
 // - Uses quarter-square margins when grid needed
 // - Eliminates unnecessary movements
 //
-// 🎯 CAPTURE SYSTEM:
-// - Detects capture moves (e4xf5)
-// - First: Remove captured piece to boundary
-// - Then: Execute normal move
-// - Edge-based movement for captured pieces
+// 🎯 SIMPLIFIED SYSTEM:
+// - All moves execute directly without capture detection
+// - No piece removal sequences
+// - Direct movement for all pieces
 
 #include <Arduino.h>
 
@@ -36,7 +35,7 @@
 // === Stepper motor and board settings
 const int step_delay = 350; // SPEED OPTIMIZED: Reduced from 450 to 350 microseconds for faster motor movement
 const long steps_per_cm = 419;
-const float initial_square_size_cm = 4.8;    // Square size before reaching (0,0) - for offset
+const float initial_square_size_cm = 4.6;    // Square size before reaching (0,0) - for offset
 const float final_square_size_cm = 5.34;     // Square size after reaching (0,0) - for moves
 float current_square_size_cm = initial_square_size_cm;
 long current_steps_per_square = steps_per_cm * initial_square_size_cm;
@@ -52,11 +51,6 @@ bool hasReachedOrigin = false;
 byte squareOccupied[8] = {0}; // 8 bytes instead of 64 bytes - each bit represents one square
 unsigned long lastBoardScan = 0;
 const unsigned long BOARD_SCAN_INTERVAL = 1000; // Scan every 1 second
-
-// === CAPTURE MOVE DETECTION ===
-bool isCaptureMove = false;
-byte captureTargetX = 255; // Use byte instead of int, 255 = invalid
-byte captureTargetY = 255;
 
 // Memory-optimized Knight path analysis structure
 struct KnightPathInfo {
@@ -141,9 +135,6 @@ void loop() {
       currentX = -2;
       currentY = 0;
       
-      // Reset capture flags
-      resetCaptureFlags();
-      
       // Send confirmation to ESP32
       Serial.println(F("ARDUINO_RESET_COMPLETE"));
       delay(50); // OPTIMIZED: Reduced from 100ms for faster reset response
@@ -207,9 +198,6 @@ void loop() {
       Serial.print(currentY);
       Serial.println(F(")"));
 
-      // Check if this is a capture move
-      checkForCaptureMove(from, to);
-
       int deltaX = toX - fromX;
       int deltaY = toY - fromY;
       bool isDiagonal = (abs(deltaX) == abs(deltaY)) && (deltaX != 0) && (deltaY != 0);
@@ -227,17 +215,6 @@ void loop() {
         Serial.println(F("DIAGONAL MOVE"));
       } else {
         Serial.println(F("STRAIGHT MOVE"));
-      }
-
-      // Handle capture sequence if needed
-      if (isCaptureMove) {
-        Serial.println(F("🎯 CAPTURE MOVE DETECTED!"));
-        
-        // Step 1: Remove captured piece first
-        executeCaptureRemoval(captureTargetX, captureTargetY);
-        
-        Serial.println(F("✅ Captured piece removed"));
-        delay(50); // SPEED OPTIMIZED: Reduced from 200ms for faster capture sequence
       }
 
       // Request current board state from ESP32 before moving (only if sensors are enabled)
@@ -299,9 +276,6 @@ void loop() {
 
       Serial.println(F("MAGNET_OFF"));
       waitForESPResponse(F("MAGNET_OFF_READY"));
-      
-      // Reset capture flags
-      resetCaptureFlags();
       
       Serial.println(F("✅ MOVE COMPLETED SUCCESSFULLY. Ready for next move."));
       Serial.println(F("================================================"));
@@ -434,24 +408,6 @@ void updatePiecePosition(int fromX, int fromY, int toX, int toY) {
   }
 }
 
-// === OPTIMIZED CAPTURE MOVE HANDLING ===
-void checkForCaptureMove(String from, String to) {
-  byte toX = fileToX(to.charAt(0));
-  byte toY = rankToY(to.charAt(1));
-  
-  // Check if destination square is occupied (indicates capture)
-  if (getSquareOccupied(toX, toY)) {
-    isCaptureMove = true;
-    captureTargetX = toX;
-    captureTargetY = toY;
-    
-    Serial.print(F("🎯 CAPTURE DETECTED: Piece at "));
-    Serial.println(to);
-  } else {
-    isCaptureMove = false;
-  }
-}
-
 // CRITICAL: Add missing updateSquareSize function from working version
 void updateSquareSize() {
   if (!hasReachedOrigin) {
@@ -461,112 +417,6 @@ void updateSquareSize() {
     steps_per_square = current_steps_per_square; // Update compatibility variable
     Serial.println(F("✅ Updated to final square size: 5.34cm"));
   }
-}
-
-void executeCaptureRemoval(int captureX, int captureY) {
-  Serial.println(F("📤 CAPTURE SEQUENCE - Removing piece via board outline"));
-  Serial.print(F("🎯 Target: "));
-  Serial.print(getSquareName(captureX, captureY));
-  Serial.println(F(" (captured piece)"));
-  
-  // Move to captured piece location
-  moveToPosition(captureX, captureY);
-  currentX = captureX;
-  currentY = captureY;
-  
-  delay(50); // SPEED OPTIMIZED: Reduced from 100ms for faster capture approach
-  
-  // Engage magnet with captured piece
-  Serial.println(F("MAGNET_ON"));
-  waitForESPResponse(F("MAGNET_READY"));
-  delay(50); // SPEED OPTIMIZED: Reduced from 200ms for faster capture magnet engagement
-  
-  // BOARD OUTLINE REMOVAL: Calculate shortest path via square edges
-  // For left/right preference, calculate distances to left and right board edges
-  int distToLeft = captureX;           // Distance to left board edge (x = 0)
-  int distToRight = 7 - captureX;      // Distance to right board edge (x = 7)
-  
-  bool useRightPath = (distToRight <= distToLeft); // Use right if equal or shorter
-  
-  Serial.print(F("🔍 Edge calculation: Left="));
-  Serial.print(distToLeft);
-  Serial.print(F(" squares, Right="));
-  Serial.print(distToRight);
-  Serial.print(F(" squares → Using "));
-  Serial.println(useRightPath ? F("RIGHT path") : F("LEFT path"));
-  
-  if (useRightPath) {
-    // RIGHT PATH: Move to square edge first, then to board outline
-    Serial.println(F("📤 RIGHT PATH: Square edge → Board outline"));
-    
-    // Step 1: Move to top or bottom edge of current square (shorter distance)
-    int distToSquareTop = (captureY < 4) ? 1 : 0;    // Distance to top edge of square
-    int distToSquareBottom = (captureY < 4) ? 0 : 1; // Distance to bottom edge of square
-    
-    if (captureY < 4) {
-      // Move to bottom edge of board first (row 0)
-      Serial.println(F("🔸 Moving to bottom board edge"));
-      moveOnlyY(-captureY); // Move to y=0 (bottom row)
-      currentY = 0;
-    } else {
-      // Move to top edge of board first (row 7)  
-      Serial.println(F("🔸 Moving to top board edge"));
-      moveOnlyY(7 - captureY); // Move to y=7 (top row)
-      currentY = 7;
-    }
-    
-    // Step 2: Drag along board outline to right edge
-    Serial.println(F("🔸 Dragging along board outline to right edge"));
-    moveOnlyX(7 - captureX + 1); // Move to right board outline (x = 8)
-    currentX = 8;
-    
-    // Step 3: Move further right to drop zone outside board
-    Serial.println(F("� Moving to drop zone outside board"));
-    moveOnlyX(1); // Move 1 more square right to clear the board
-    currentX = 9;
-    
-  } else {
-    // LEFT PATH: Move to square edge first, then to board outline
-    Serial.println(F("📤 LEFT PATH: Square edge → Board outline"));
-    
-    // Step 1: Move to top or bottom edge of current square
-    if (captureY < 4) {
-      // Move to bottom edge of board first
-      Serial.println(F("🔸 Moving to bottom board edge"));
-      moveOnlyY(-captureY); // Move to y=0 (bottom row)
-      currentY = 0;
-    } else {
-      // Move to top edge of board first
-      Serial.println(F("🔸 Moving to top board edge"));
-      moveOnlyY(7 - captureY); // Move to y=7 (top row)
-      currentY = 7;
-    }
-    
-    // Step 2: Drag along board outline to left edge
-    Serial.println(F("🔸 Dragging along board outline to left edge"));
-    moveOnlyX(-captureX - 1); // Move to left board outline (x = -1)
-    currentX = -1;
-    
-    // Step 3: Captured piece ready at left board outline
-    Serial.println(F("🔸 Captured piece at left board outline"));
-  }
-  
-  // Drop captured piece at board outline
-  Serial.println(F("📍 Dropping captured piece at board outline"));
-  Serial.println(F("MAGNET_OFF"));
-  waitForESPResponse(F("MAGNET_OFF_READY"));
-  
-  // Update board state - captured piece removed
-  updatePiecePosition(captureX, captureY, -1, -1);
-  
-  Serial.println(F("✅ Captured piece successfully removed via board outline"));
-  delay(50); // SPEED OPTIMIZED: Reduced from 150ms for faster capture completion
-}
-
-void resetCaptureFlags() {
-  isCaptureMove = false;
-  captureTargetX = 255; // Invalid position
-  captureTargetY = 255;
 }
 
 // === INTELLIGENT KNIGHT MOVEMENT SYSTEM ===
@@ -1104,38 +954,4 @@ void applyOffset(float offsetX_cm, float offsetY_cm) {
   }
 
   Serial.println("Offset applied");
-}
-
-// Y movement with half-square offset for carrying captured pieces
-void moveOnlyYCapture(int squares) {
-  if (squares == 0) return;
-  
-  Serial.print(F("🔧 Y Movement WITH CAPTURE OFFSET: "));
-  Serial.print(squares);
-  Serial.print(F(" squares "));
-  Serial.print(squares > 0 ? F("UP (+Y)") : F("DOWN (-Y)"));
-  Serial.println(F(" + 0.5 square offset"));
-  
-  // ORIGINAL WORKING: A motor direction, B motor opposite direction for Y movement
-  digitalWrite(A_DIR_PIN, squares > 0 ? HIGH : LOW);   // A motor direction
-  digitalWrite(B_DIR_PIN, squares > 0 ? LOW : HIGH);   // B motor opposite direction for Y movement
-  
-  // Calculate steps: full squares + half square offset
-  long halfSquareSteps = (steps_per_cm * final_square_size_cm) / 2;  // Half square in steps
-  long fullSquareSteps = abs(squares) * steps_per_square;           // Full squares in steps
-  long totalSteps = fullSquareSteps + halfSquareSteps;              // Total movement
-  
-  Serial.print(F("   📏 Steps: "));
-  Serial.print(fullSquareSteps);
-  Serial.print(F(" ("));
-  Serial.print(abs(squares));
-  Serial.print(F(" squares) + "));
-  Serial.print(halfSquareSteps);
-  Serial.print(F(" (0.5 square) = "));
-  Serial.print(totalSteps);
-  Serial.println(F(" total steps"));
-  
-  for (long i = 0; i < totalSteps; i++) {
-    stepBoth();
-  }
 }

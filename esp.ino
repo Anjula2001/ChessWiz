@@ -17,17 +17,18 @@
 #include <freertos/task.h>
 #include <freertos/queue.h>
 #include <freertos/semphr.h>
+// REMOVED: #include <esp_task_wdt.h> - causing compatibility issues
 
 // WiFi credentials
-const char* ssid = "POCO X3 NFC";
-const char* password = "123456789";
+const char* ssid = "Silly Signal";
+const char* password = "tharushatharusha";
 
 // Server configuration - CORRECTED IP
-const char* serverIP = "192.168.170.94";  // Your computer's IP address
-const char* getMovesURL = "http://192.168.170.94:3001/getAnyMove";        
-const char* getSinglePlayerURL = "http://192.168.170.94:3001/getLastMove?roomId=singleplayer-default";
-const char* getMultiPlayerURL = "http://192.168.170.94:3001/getLastMove?roomId=default";
-const char* sendMoveURL = "http://192.168.170.94:3001/physicalMove";      
+const char* serverIP = "192.168.209.94";  // Your computer's IP address
+const char* getMovesURL = "http://192.168.209.94:3001/getAnyMove";        
+const char* getSinglePlayerURL = "http://192.168.209.94:3001/getLastMove?roomId=singleplayer-default";
+const char* getMultiPlayerURL = "http://192.168.209.94:3001/getLastMove?roomId=default";
+const char* sendMoveURL = "http://192.168.209.94:3001/physicalMove";      
 
 // --- Pin Definitions ---
 #define MAGNET_PIN 23
@@ -114,13 +115,12 @@ String webPlayerColor = "";      // Track the web player's chosen color
 String lastSentMove = "";
 int moveCount = 0;
 
-// Connection stability
-// WiFi check timing removed - continuous operation mode
-// WiFi check interval removed - continuous operation without reconnection
+// Minimal WiFi stability - connect once and stay connected
+unsigned long lastWiFiCheck = 0;
+const unsigned long WIFI_CHECK_INTERVAL = 60000; // Check only every 60 seconds (much less frequent)
 int consecutiveErrors = 0;
-const int maxConsecutiveErrors = 5; 
-// WiFi reconnection feature removed - continuous operation prioritized
-bool networkStable = true; 
+const int maxConsecutiveErrors = 10; // Increased tolerance before considering connection bad
+bool networkStable = false; // Start as unstable until connected 
 
 // Arduino communication via standard UART pins (GPIO1/GPIO3)
 #define ARDUINO_SERIAL Serial   // Use Serial for Arduino communication (GPIO1/3)
@@ -174,6 +174,9 @@ void selectMUXChannel(int channel) {
 
 void setup() {
   Serial.begin(115200);  
+  
+  // REMOVED: Watchdog timer initialization - causing compatibility issues
+  // ESP32 has built-in hardware watchdog that handles system stability
   
   // Using Serial for Arduino communication (GPIO1/3)
   delay(1000);  // OPTIMIZED: Reduced from 2000ms - faster boot
@@ -284,12 +287,15 @@ void setupMultiplexers() {
 }
 
 void connectToWiFi() {
-  DEBUG_PRINT("Connecting to WiFi");
+  DEBUG_PRINT("Connecting to WiFi - ONE TIME SETUP");
   
   WiFi.mode(WIFI_STA);
-  WiFi.setAutoReconnect(false); // Disabled for continuous operation
+  WiFi.setAutoReconnect(true); // ENABLED for background auto-reconnection
   WiFi.persistent(true);
   WiFi.setSleep(false); // Disable WiFi sleep
+  
+  // REMOVED: setAutoConnect() - function doesn't exist in newer ESP32 core
+  // Auto-reconnect is handled by setAutoReconnect(true)
   
   WiFi.begin(ssid, password);
   
@@ -301,7 +307,7 @@ void connectToWiFi() {
   }
   
   if (WiFi.status() == WL_CONNECTED) {
-    DEBUG_PRINT("\n✅ WiFi Connected!");
+    DEBUG_PRINT("\n✅ WiFi Connected - AUTO-RECONNECT ENABLED!");
     DEBUG_PRINT("📍 ESP32 IP: ");
     DEBUG_PRINT(WiFi.localIP());
     DEBUG_PRINT("📡 Server IP: ");
@@ -315,18 +321,47 @@ void connectToWiFi() {
     DEBUG_PRINT("🔘 Push button on GPIO19 to activate sensor detection after motor moves...");
     DEBUG_PRINT("🔄 Push button on GPIO18 to RESET whole game (ESP32 + Arduino)...");
     DEBUG_PRINT("🤖 Arduino communication on default Serial (GPIO1/GPIO3) at 115200 baud");
+    DEBUG_PRINT("� WiFi will auto-reconnect in background - NO MANUAL CHECKING");
     
     networkStable = true;
     consecutiveErrors = 0;
   } else {
     DEBUG_PRINT("\n❌ WiFi Connection Failed!");
-    DEBUG_PRINT("Please check your WiFi credentials");
+    DEBUG_PRINT("ESP32 will continue trying in background...");
     networkStable = false;
+  }
+}
+
+// ==========================================
+// 📶 Minimal WiFi Status Check (Non-Intrusive)
+// ==========================================
+void checkWiFiConnection() {
+  // Only check very infrequently to avoid interference
+  if (millis() - lastWiFiCheck < WIFI_CHECK_INTERVAL) {
+    return;
+  }
+  
+  lastWiFiCheck = millis();
+  
+  // Just update status, don't force reconnection
+  // Let ESP32's auto-reconnect handle it in background
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!networkStable) {
+      DEBUG_PRINT("📶 WiFi connection restored");
+      networkStable = true;
+      consecutiveErrors = 0;
+    }
+  } else {
+    if (networkStable) {
+      DEBUG_PRINT("⚠️ WiFi connection lost - ESP32 will auto-reconnect in background");
+      networkStable = false;
+    }
   }
 }
 
 void loop() {
   // Main loop is now empty - all work done by FreeRTOS tasks
+  // REMOVED: Watchdog reset - not needed, ESP32 handles stability automatically
   vTaskDelay(pdMS_TO_TICKS(1000)); // Sleep for 1 second
 }
 
@@ -334,30 +369,37 @@ void loop() {
 // 🌐 CORE 0 TASK: WiFi Communications & Arduino
 // ==========================================
 void wifiTask(void *parameter) {
+  // REMOVED: Watchdog timer registration - causing issues
+  
   // Initialize WiFi on Core 0
   connectToWiFi();
   
   unsigned long lastPollTime = 0;
   
-  DEBUG_PRINT("📡 Core 0: WiFi task started - Continuous operation mode");
+  DEBUG_PRINT("📡 Core 0: WiFi task started - MINIMAL MONITORING MODE");
   
   while (true) {
-    // Poll for web/AI moves only if connected
-    if (WiFi.status() == WL_CONNECTED) {
-      if (millis() - lastPollTime >= pollInterval) {
+    // MINIMAL WiFi monitoring - only check status, don't interfere
+    checkWiFiConnection();
+    
+    // Poll for web/AI moves - continue even if WiFi temporarily down
+    if (millis() - lastPollTime >= pollInterval) {
+      if (WiFi.status() == WL_CONNECTED) {
         checkForWebMovesTask();
-        lastPollTime = millis();
       }
+      lastPollTime = millis();
     }
     
-    // Handle physical moves from Core 1 - ALWAYS AVAILABLE
+    // PRIORITY 3: Handle physical moves from Core 1 - ALWAYS AVAILABLE
     PhysicalMoveMsg physicalMove;
     if (xQueueReceive(physicalMoveQueue, &physicalMove, 0) == pdTRUE) {
       sendPhysicalMoveTask(String(physicalMove.move));
     }
     
-    // Handle Arduino communication - ALWAYS AVAILABLE
+    // PRIORITY 4: Handle Arduino communication - ALWAYS AVAILABLE
     handleArduinoCommunicationTask();
+    
+    // REMOVED: Watchdog reset - not needed, ESP32 handles stability
     
     vTaskDelay(pdMS_TO_TICKS(25)); // OPTIMIZED: 25ms delay (was 50ms) for faster WiFi response
   }
@@ -367,6 +409,8 @@ void wifiTask(void *parameter) {
 // 🎯 CORE 1 TASK: Sensor Detection & Button Handling
 // ==========================================
 void sensorTask(void *parameter) {
+  // REMOVED: Watchdog timer registration - causing issues
+  
   unsigned long lastScanTime = 0;
   unsigned long lastPrintTime = 0;
   
@@ -412,6 +456,8 @@ void sensorTask(void *parameter) {
       }
     }
     
+    // REMOVED: Watchdog reset - not needed, ESP32 handles stability
+    
     vTaskDelay(pdMS_TO_TICKS(5)); // OPTIMIZED: 5ms delay (was 10ms) for faster sensor response
   }
 }
@@ -440,7 +486,7 @@ void checkForWebMovesTask() {
   }
   
   http.addHeader("Content-Type", "application/json");
-  http.setTimeout(1500); 
+  http.setTimeout(1000); // REDUCED: 1s timeout to prevent blocking
   
   int httpCode = http.GET();
   
@@ -508,10 +554,11 @@ void checkForWebMovesTask() {
   } else {
     consecutiveErrors++;
     if (consecutiveErrors >= maxConsecutiveErrors) {
-      networkStable = false;
+      DEBUG_PRINT("⚠️ Multiple HTTP errors - but continuing operation");
+      
       if (consecutiveErrors >= maxConsecutiveErrors + 10) {
+        DEBUG_PRINT("🔄 Resetting error counter - continuing");
         consecutiveErrors = 0;
-        networkStable = true;
       }
     }
   }
@@ -549,7 +596,7 @@ void sendPhysicalMoveTask(String move) {
   }
   
   http.addHeader("Content-Type", "application/json");
-  http.setTimeout(1500);
+  http.setTimeout(1000); // REDUCED: 1s timeout to prevent blocking
   
   // SIMPLIFIED LOGIC: ESP32 sends all physical moves to server
   // Web frontend handles game mode detection and routing
