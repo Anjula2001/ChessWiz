@@ -1,4 +1,4 @@
-# ChessWizzz 🏆
+# ChessWiz 🏆
 
 A revolutionary intelligent chess system combining physical board automation with AI-powered gameplay. Built with ESP32, Arduino, React, and Stockfish engine integration.
 
@@ -258,6 +258,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **🏆 ChessWizzz - Where Physical Meets Digital Chess 🏆**
 
-*Built with ❤️ by the ChessWizzz Team*
+*Built with ❤️ by the ChessWiz Team*
 
 </div>
