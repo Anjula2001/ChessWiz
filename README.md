@@ -256,7 +256,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 <div align="center">
 
-**🏆 ChessWizzz - Where Physical Meets Digital Chess 🏆**
+**🏆 ChessWiz - Where Physical Meets Digital Chess 🏆**
 
 *Built with ❤️ by the ChessWiz Team*
 
